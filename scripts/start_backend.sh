@@ -7,14 +7,23 @@ LOG_DIR="/root/logs/github-python"
 
 cd "${ROOT_DIR}"
 
+source_env_file() {
+  local env_file="$1"
+
+  if [ -f "${env_file}" ]; then
+    set +u
+    # shellcheck disable=SC1090
+    source "${env_file}"
+    set -u
+  fi
+}
+
 if [ -f "${HOME}/.bash_profile" ]; then
-  # shellcheck disable=SC1090
-  source "${HOME}/.bash_profile"
+  source_env_file "${HOME}/.bash_profile"
 fi
 
 if [ -f ".env" ]; then
-  # shellcheck disable=SC1091
-  source ".env"
+  source_env_file ".env"
 fi
 
 mkdir -p "${LOG_DIR}"
