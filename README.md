@@ -75,48 +75,18 @@ python3 main.py
 
 生成 `output/latest.json`、`output/<source>/<YYYY-MM-DD>/<batch>.json` 并刷新 Redis 就说明采集成功。日志在 `/root/logs/github-python/trending.log`。
 
-### 4. 启动后端 API
+### 4. 启动后端 API （本地调试）
 
 ```bash
-./scripts/start_backend.sh
+python3 -m uvicorn api:app --host 0.0.0.0 --port 8000
 ```
 
 启动后端后会同时启动 FastAPI 和 Python 进程内采集调度器，默认每天 `07:50`、`15:50`、`23:50` 采集一次。生产环境请保持 uvicorn 单 worker 运行，避免多个 worker 同时启动多套调度器。
 
-### 5. 启动前端
+### 5. 启动前端 （本地调试）
 
 ```bash
-./scripts/start_frontend.sh
-```
-
-本地开发时也可以同时启动后端和前端：
-
-```bash
-./scripts/start_all.sh
-```
-
-`start_all.sh` 会把进程号和日志写到 `.runtime/` 目录。
-
-生产部署建议由 Nginx 托管 `frontend/dist/`，并将 `/api/` 反代到 FastAPI 服务。
-
-## 启动脚本
-
-后端：
-
-```bash
-./scripts/start_backend.sh
-```
-
-前端：
-
-```bash
-./scripts/start_frontend.sh
-```
-
-本地联调：
-
-```bash
-./scripts/start_all.sh
+npm run serve
 ```
 
 ## 文件结构
@@ -277,6 +247,22 @@ export SPIDER_RUN_ON_STARTUP=true
 ## 前端
 
 前端位于 `frontend/`，技术栈为 Vue 3 + Vue CLI。开发环境下 `/api` 会代理到 `http://localhost:8000`。
+
+页面标题为**每日AI前沿信息**，侧边栏来源标签由前端 `SOURCE_DISPLAY_MAP` 覆盖显示（不改后端注册表）：
+
+
+| 来源 ID         | 侧边栏显示          |
+| ------------- | -------------- |
+| github-daily  | 今日开源热榜         |
+| github-weekly | 本周开源精选         |
+| hacker-news   | 硅谷社区热议         |
+| tldr-ai       | AI 速报精选        |
+| openai        | OpenAI 最新动态    |
+| anthropic     | Anthropic 最新动态 |
+| infoq         | AI 工程实践        |
+
+
+每条内容卡片只展示标题 + 中文摘要 + 「阅读原文 →」链接。Topbar 右侧标注「⏱ 每 8 小时更新」。
 
 ```bash
 cd frontend

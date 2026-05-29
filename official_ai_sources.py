@@ -126,6 +126,12 @@ def _fetch_text(url, max_retries):
     return ""
 
 
+def _extract_content_type(text):
+    """从页面文本中提取 OpenAI/Anthropic 文章分类关键词。"""
+    match = re.search(r"\b(Product|Announcements|Research|Company|Safety)\b", text)
+    return match.group(1) if match else ""
+
+
 def _parse_news_page(html_text, base_url, source, category):
     """解析官方新闻页链接，适配 OpenAI 和 Anthropic 页面。"""
     soup = BeautifulSoup(html_text, "html.parser")
@@ -146,6 +152,8 @@ def _parse_news_page(html_text, base_url, source, category):
 
         seen.add(title)
         summary = _extract_summary(parent_text, title)
+        content_type = _extract_content_type(parent_text)
+        meta = {"content_type": content_type} if content_type else {}
         items.append(make_content_item(
             source=source,
             category=category,
@@ -153,6 +161,7 @@ def _parse_news_page(html_text, base_url, source, category):
             url=url,
             published_at=_extract_date(parent_text),
             original_summary=summary,
+            meta=meta,
         ))
 
     return items
@@ -178,7 +187,13 @@ def _parse_rss_items(rss_text, source, default_category):
         link = _clean_text(_node_text(node, "link"))
         pub_date = _clean_text(_node_text(node, "pubDate"))
         description = _clean_html(_node_text(node, "description"))
-        source_category = _clean_text(_node_text(node, "category")) or default_category
+        rss_category = _clean_text(_node_text(node, "category"))
+        source_category = rss_category or default_category
+        # 若 RSS category 恰好是内容分类关键词（如 Safety / Research），存入 meta
+        content_type = rss_category if rss_category in (
+            "Product", "Announcements", "Research", "Company", "Safety"
+        ) else ""
+        meta = {"content_type": content_type} if content_type else {}
         if title and link:
             items.append(make_content_item(
                 source=source,
@@ -187,6 +202,7 @@ def _parse_rss_items(rss_text, source, default_category):
                 url=link,
                 published_at=pub_date,
                 original_summary=description,
+                meta=meta,
             ))
     return items
 

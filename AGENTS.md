@@ -4,9 +4,9 @@
 
 ## 项目概览
 
-这是一个 Python 脚本型 AI 后端专项信息源聚合项目。主流程每天抓取 GitHub Trending、Hacker News、TLDR AI、OpenAI、Anthropic、InfoQ AI Development 等信息源，通过 GitHub Models API 生成中文摘要，输出 HTML 邮件，并生成统一 JSON 文件供后续后端落 Redis 或其他存储使用。
+这是一个 Python + Vue 全栈 AI 信息源聚合项目。主流程每天抓取 GitHub Trending、Hacker News、TLDR AI、OpenAI、Anthropic、InfoQ AI Development 等信息源，通过 GitHub Models API 生成中文摘要，按来源永久归档到磁盘，并写入 Redis 作为 3 天热数据缓存。
 
-当前不是 Web 服务，也不直接写 Redis；`output/latest.json` 是后续后端接入点。
+项目同时提供 FastAPI 只读接口和 Vue 3 前端资讯流页面（页面标题"每日AI前沿信息"），由 Nginx 静态托管前端、反代 `/api/` 到 FastAPI。`output/latest.json` 作为统一 JSON 兼容旧版接入点继续保留。
 
 ## 主要入口与模块
 
@@ -17,9 +17,15 @@
 - `tldr_ai.py`: TLDR AI 最新一期抓取和中文整理。
 - `official_ai_sources.py`: OpenAI、Anthropic、InfoQ AI Development 信息源抓取。
 - `content_items.py`: 统一信息项模型、跨来源 JSON 适配、统一 AI 摘要、JSON 输出。
+- `content_store.py`: 按来源归档写磁盘、Redis 最新快照读写、Redis 不可用时降级读磁盘。
+- `redis_client.py`: Redis 进程级连接池，连接失败时返回 None 供调用方降级。
+- `source_registry.py`: 来源 ID、label、category 注册表，前端/API/Redis key/磁盘路径共用。
+- `api.py`: FastAPI 公开只读接口，提供 `/api/sources` 和 `/api/sources/{id}/latest`。
+- `scheduler.py`: FastAPI 进程内采集调度器，按配置时间定时触发 `main.py` 主流程。
 - `email_builder.py`: HTML 邮件内容生成。
 - `email_sender.py`: SMTP 邮件发送。
 - `test_email.py`: SMTP 发送测试脚本。
+- `frontend/`: Vue 3 + Vue CLI 前端资讯流，页面标题"每日AI前沿信息"，侧边栏来源标签由前端映射覆盖显示。
 
 ## 运行方式
 
@@ -136,9 +142,29 @@ source ~/.bash_profile && cd /root/work/workspace/gitee/github-trending-spider &
 
 后续任务若涉及新增源、调整邮件、调整 JSON 结构或改运行配置，必须先对照以上历史，复用已有模块边界，不要重新设计主流程。
 
+### `.task/2026-05-29_1-frontend-redesign.md` 前端重设计
+
+- 全量重写 `frontend/src/App.vue` 视觉层，风格定位「科技资讯媒体 · Editorial」。
+- 引入 Google Fonts：DM Sans + Noto Sans SC，替换系统默认字体。
+- 品牌区：渐变图标（蓝→紫）+ 标题"每日AI前沿信息" + 副标题 + "⏱ 每 8 小时更新" chip。
+- 删除搜索框及相关 `keyword` / `filteredItems` / `servedFromText` 逻辑。
+- 删除 feed toolbar 中的更新时间、数据来源、条数计数展示。
+- 内容卡片精简为：标题 + 中文摘要 + "阅读原文 →"，去掉 `backend_focus`、meta tags、`published_at`。
+- 新增 `SOURCE_DISPLAY_MAP` 前端覆盖映射（不改后端 `source_registry.py`）：
+  - github-daily → 今日开源热榜 / GitHub · 日榜
+  - github-weekly → 本周开源精选 / GitHub · 周榜
+  - hacker-news → 硅谷社区热议 / Hacker News
+  - tldr-ai → AI 速报精选 / TLDR AI
+  - openai → OpenAI 最新动态 / 官方更新
+  - anthropic → Anthropic 最新动态 / 官方更新
+  - infoq → AI 工程实践 / InfoQ AI
+- loading 状态改为 3 个 shimmer 骨架卡片动画，替代纯文字"正在加载数据"。
+- 侧边栏 active 状态增加左竖线 indicator；卡片 hover 增加左竖线 + 背景过渡。
+- `public/index.html` title 同步改为"每日AI前沿信息"。
+
 ## 开发约定
 
-- 优先保持脚本结构简单，不引入 Flask/FastAPI，除非需求明确要求站点服务。
+- 项目已引入 FastAPI + Vue 前端作为标准 Web 服务层，不再需要从零引入；新功能直接在现有 `api.py` / `frontend/` 上扩展。
 - 新增信息源时，应优先选择官方 RSS/API；HTML 页面解析只能作为兜底。
 - 每个信息源必须独立容错，不能因单个源失败导致其他源无法输出。
 - 新增来源必须适配到 `content_items.py` 的统一字段：

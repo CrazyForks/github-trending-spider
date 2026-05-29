@@ -32,7 +32,7 @@ CATEGORY_AI_ENGINEERING = "AI 工程实践"
 
 
 def make_content_item(source, category, title, url, published_at="", original_summary="",
-                      chinese_summary="", backend_focus=""):
+                      chinese_summary="", backend_focus="", meta=None):
     """创建统一信息项。"""
     return {
         "source": source or "",
@@ -43,6 +43,7 @@ def make_content_item(source, category, title, url, published_at="", original_su
         "original_summary": original_summary or "",
         "chinese_summary": chinese_summary or "",
         "backend_focus": backend_focus or "",
+        "meta": meta if meta is not None else {},
     }
 
 
@@ -149,6 +150,12 @@ def _github_to_items(repos, source, category_suffix):
             repo.get("forks", 0),
             repo.get("stars_period", ""),
         )
+        meta = {
+            "language": repo.get("language") or "",
+            "stars": repo.get("stars", 0),
+            "forks": repo.get("forks", 0),
+            "stars_period": repo.get("stars_period", ""),
+        }
         items.append(make_content_item(
             source=source,
             category="{}-{}".format(CATEGORY_OPEN_SOURCE, category_suffix),
@@ -157,6 +164,7 @@ def _github_to_items(repos, source, category_suffix):
             original_summary=original_summary,
             chinese_summary=summary,
             backend_focus=summary,
+            meta=meta,
         ))
     return items
 
@@ -172,6 +180,11 @@ def _hn_to_items(stories):
             story.get("by", ""),
         )
         summary = story.get("ai_summary", "")
+        meta = {
+            "score": story.get("score", 0),
+            "comments": story.get("descendants", 0),
+            "hn_url": hn_url,
+        }
         items.append(make_content_item(
             source=SOURCE_HACKER_NEWS,
             category=CATEGORY_COMMUNITY,
@@ -181,6 +194,7 @@ def _hn_to_items(stories):
             original_summary=original_summary,
             chinese_summary=summary,
             backend_focus=summary,
+            meta=meta,
         ))
     return items
 
