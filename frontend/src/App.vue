@@ -53,15 +53,18 @@
             <a class="item-title" :href="item.url" target="_blank" rel="noreferrer">
               {{ item.title }}
             </a>
+            <p class="item-summary">{{ item.chinese_summary || item.original_summary }}</p>
             <div class="item-tags" v-if="getItemTags(item).length">
               <span
                 v-for="tag in getItemTags(item)"
                 :key="tag.label"
                 class="item-tag"
                 :class="'item-tag--' + tag.type"
-              >{{ tag.label }}</span>
+              >
+                <span v-if="tag.dotColor" class="lang-dot" :style="{ background: tag.dotColor }"></span>
+                {{ tag.label }}
+              </span>
             </div>
-            <p class="item-summary">{{ item.chinese_summary || item.original_summary }}</p>
           </div>
           <a
             class="open-link"
@@ -116,6 +119,40 @@ const INFOQ_CATEGORY_MAP = {
   'Machine Learning': '机器学习',
 };
 
+const LANGUAGE_COLORS = {
+  'JavaScript':       '#f1e05a',
+  'TypeScript':       '#3178c6',
+  'Python':           '#3572A5',
+  'Go':               '#00ADD8',
+  'Rust':             '#dea584',
+  'Java':             '#b07219',
+  'C++':              '#f34b7d',
+  'C':                '#555555',
+  'C#':               '#178600',
+  'Ruby':             '#701516',
+  'Swift':            '#F05138',
+  'Kotlin':           '#A97BFF',
+  'Shell':            '#89e051',
+  'HTML':             '#e34c26',
+  'CSS':              '#563d7c',
+  'Vue':              '#41b883',
+  'PHP':              '#4F5D95',
+  'Scala':            '#c22d40',
+  'Dart':             '#00B4AB',
+  'Elixir':           '#6e4a7e',
+  'Haskell':          '#5e5086',
+  'Lua':              '#000080',
+  'R':                '#198CE7',
+  'Jupyter Notebook': '#DA5B0B',
+  'CUDA':             '#3A4E3A',
+  'Makefile':         '#427819',
+  'Nix':              '#7e7eff',
+  'Zig':              '#ec915c',
+  'OCaml':            '#ef7a08',
+  'Perl':             '#0298c3',
+  'Dockerfile':       '#384d54',
+};
+
 export default {
   name: 'App',
   data() {
@@ -149,30 +186,47 @@ export default {
     isHN(item) {
       return item.source === 'Hacker News';
     },
+    formatDate(str) {
+      if (!str) return '';
+      const s = String(str).trim();
+      // Unix timestamp（HN 使用，9-10 位纯数字）
+      if (/^\d{9,10}$/.test(s)) {
+        return new Date(Number(s) * 1000).toISOString().slice(0, 10);
+      }
+      // 已是 YYYY-MM-DD 格式，直接返回
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      // ISO 8601 / RFC 2822 等，用 Date 解析后取前10位
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+      // 尝试提取字符串中的 YYYY-MM-DD
+      const m = s.match(/(\d{4}-\d{2}-\d{2})/);
+      if (m) return m[1];
+      return s;
+    },
     getItemTags(item) {
       const tags = [];
       const meta = item.meta || {};
       const src = item.source || '';
 
       if (src === 'GitHub Trending Daily' || src === 'GitHub Trending Weekly') {
-        if (meta.language)     tags.push({ label: meta.language, type: 'lang' });
+        if (meta.language)     tags.push({ label: meta.language, type: 'lang', dotColor: LANGUAGE_COLORS[meta.language] || '#888' });
         if (meta.stars)        tags.push({ label: '⭐ ' + meta.stars.toLocaleString(), type: 'stat' });
-        if (meta.forks)        tags.push({ label: '🍴 ' + meta.forks.toLocaleString(), type: 'stat' });
+        if (meta.forks)        tags.push({ label: '🍴 ' + meta.forks.toLocaleString(), type: 'fork' });
         if (meta.stars_period) tags.push({ label: meta.stars_period, type: 'growth' });
       } else if (src === 'Hacker News') {
         if (meta.score != null)    tags.push({ label: '▲ ' + meta.score, type: 'stat' });
-        if (meta.comments != null) tags.push({ label: '💬 ' + meta.comments + ' 评论', type: 'stat' });
+        if (meta.comments != null) tags.push({ label: '💬 ' + meta.comments + ' 评论', type: 'fork' });
       } else if (src === 'TLDR AI') {
         const cat = TLDR_CATEGORY_MAP[item.category];
         if (cat) tags.push({ label: cat, type: 'category' });
       } else if (src === 'OpenAI' || src === 'Anthropic') {
         const ct = CONTENT_TYPE_MAP[meta.content_type];
         if (ct) tags.push({ label: ct, type: 'category' });
-        if (item.published_at) tags.push({ label: item.published_at, type: 'date' });
+        if (item.published_at) tags.push({ label: this.formatDate(item.published_at), type: 'date' });
       } else if (src === 'InfoQ AI Development') {
         const cat = INFOQ_CATEGORY_MAP[item.category];
         if (cat) tags.push({ label: cat, type: 'category' });
-        if (item.published_at) tags.push({ label: item.published_at, type: 'date' });
+        if (item.published_at) tags.push({ label: this.formatDate(item.published_at), type: 'date' });
       }
       return tags;
     },
@@ -242,6 +296,8 @@ body {
   margin: 0;
   color: var(--text-1);
   background: var(--bg);
+  background-image: radial-gradient(circle, #c8d0de 1px, transparent 1px);
+  background-size: 28px 28px;
   font-family: 'DM Sans', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
@@ -299,6 +355,7 @@ a {
   line-height: 1.3;
   letter-spacing: -0.3px;
   color: var(--text-1);
+  font-family: 'Bricolage Grotesque', 'DM Sans', sans-serif;
 }
 
 .brand-text p {
@@ -428,6 +485,7 @@ a {
   font-weight: 700;
   letter-spacing: -0.3px;
   color: var(--text-1);
+  font-family: 'Bricolage Grotesque', 'DM Sans', sans-serif;
 }
 
 /* ── Feed item ────────────────────────────── */
@@ -492,43 +550,71 @@ a {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin: 8px 0 0;
+  margin: 10px 0 0;
 }
 
 .item-tag {
   display: inline-flex;
   align-items: center;
-  padding: 2px 8px;
+  gap: 5px;
+  padding: 2px 9px;
   border-radius: 20px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
-  line-height: 1.6;
+  line-height: 1.7;
   white-space: nowrap;
+  border: 1px solid transparent;
 }
 
+/* 语言 tag — 灰色胶囊 + 彩色圆点 */
 .item-tag--lang {
   background: #F3F4F6;
   color: #374151;
+  border-color: #E5E7EB;
 }
 
+/* 圆点 */
+.lang-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Stars — 暖金 */
 .item-tag--stat {
-  background: #FFF7ED;
-  color: #C2410C;
+  background: #FFFBEB;
+  color: #92400E;
+  border-color: #FDE68A;
 }
 
+/* Forks / 评论 — 蓝灰 */
+.item-tag--fork {
+  background: #F0F4FF;
+  color: #3B5BDB;
+  border-color: #C5D0FA;
+}
+
+/* Stars today — 绿色 */
 .item-tag--growth {
   background: #F0FDF4;
-  color: #15803D;
+  color: #166534;
+  border-color: #BBF7D0;
 }
 
+/* 分类 — 主色蓝 */
 .item-tag--category {
   background: var(--primary-soft);
   color: var(--primary);
+  border-color: #C7D9FF;
 }
 
+/* 日期 — 中性灰 */
 .item-tag--date {
-  background: #F3F4F6;
+  background: #F9FAFB;
   color: #6B7280;
+  border-color: #E5E7EB;
 }
 
 .open-link {
