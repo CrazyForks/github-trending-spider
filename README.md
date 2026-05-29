@@ -1,5 +1,9 @@
 # AI 后端专项信息源 Spider
 
+中文 | [English](README_EN.md)
+
+---
+
 每日自动爬取 GitHub Trending、Hacker News、TLDR AI、OpenAI、Anthropic 和 InfoQ AI Development，通过 AI 生成中文总结，写出统一 JSON、按来源永久归档，并写入 Redis 作为 3 天热数据缓存。项目同时提供 FastAPI 只读接口和 Vue 前端资讯流页面。
 
 ## 功能

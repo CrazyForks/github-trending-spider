@@ -7,11 +7,21 @@
           <div class="brand-mark">AI</div>
         </div>
         <div class="brand-text">
-          <h1>每日AI前沿信息</h1>
-          <p>开源趋势 · 社区热议 · AI 动态</p>
+          <h1>{{ t('siteTitle') }}</h1>
+          <p>{{ t('subtitle') }}</p>
         </div>
       </div>
-      <div class="update-chip">⏱ {{ countdownText }}</div>
+      <div class="topbar-actions">
+        <div class="lang-switch">
+          <button :class="{ active: lang === 'zh' }" @click="switchLang('zh')">中文</button>
+          <span class="lang-sep">|</span>
+          <button :class="{ active: lang === 'en' }" @click="switchLang('en')">EN</button>
+        </div>
+        <div class="update-chip">⏱ {{ countdownText }}</div>
+        <a class="gh-link" href="https://github.com/wenbochang888/github-trending-spider" target="_blank" rel="noreferrer" aria-label="GitHub 仓库">
+          <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        </a>
+      </div>
     </header>
 
     <main class="layout">
@@ -43,7 +53,7 @@
         </div>
         <div v-else-if="errorMessage" class="state-box error">{{ errorMessage }}</div>
         <div v-else-if="items.length === 0" class="state-box">
-          当前来源暂无内容
+          {{ t('noContent') }}
         </div>
 
         <article
@@ -56,7 +66,7 @@
             <a class="item-title" :href="item.url" target="_blank" rel="noreferrer">
               {{ item.title }}
             </a>
-            <p class="item-summary">{{ item.chinese_summary || item.original_summary }}</p>
+            <p class="item-summary">{{ lang === 'zh' ? (item.chinese_summary || item.original_summary) : (item.original_summary || item.chinese_summary) }}</p>
             <div class="item-tags" v-if="getItemTags(item).length">
               <span
                 v-for="tag in getItemTags(item)"
@@ -75,17 +85,68 @@
             target="_blank"
             rel="noreferrer"
           >
-            {{ isHN(item) ? '查看讨论 →' : '阅读原文 →' }}
+            {{ isHN(item) ? t('viewDiscussion') : t('readOriginal') }}
           </a>
         </article>
       </section>
     </main>
-    <footer class="site-footer">✨ 微信公众号：程序员博博 ✨</footer>
+    <footer class="site-footer">{{ t('footer') }}</footer>
   </div>
 </template>
 
 <script>
 const API_PREFIX = '/api';
+
+// ── i18n：语言优先级 URL 参数 > localStorage > 默认 'zh' ──
+function getInitialLang() {
+  const params = new URLSearchParams(window.location.search);
+  const urlLang = params.get('lang');
+  if (urlLang === 'en' || urlLang === 'zh') return urlLang;
+  const stored = localStorage.getItem('lang');
+  if (stored === 'en' || stored === 'zh') return stored;
+  return 'zh';
+}
+
+const I18N = {
+  zh: {
+    siteTitle: '每日AI前沿信息',
+    subtitle: '开源趋势 · 社区热议 · AI 动态',
+    updateEvery8h: '每 8 小时更新',
+    countdownHour: '时',
+    countdownMin: '分',
+    countdownSec: '秒',
+    countdownSuffix: '后更新',
+    noContent: '当前来源暂无内容',
+    loadSourceErr: '加载来源失败：',
+    loadContentErr: '加载内容失败：',
+    sourceApiErr: '来源接口返回 ',
+    dataApiErr: '数据接口返回 ',
+    readOriginal: '阅读原文 →',
+    viewDiscussion: '查看讨论 →',
+    defaultLabel: '最新内容',
+    footer: '✨ 微信公众号：程序员博博 ✨',
+    comments: ' 评论',
+  },
+  en: {
+    siteTitle: 'Daily AI Frontier',
+    subtitle: 'Open Source · Community · AI Updates',
+    updateEvery8h: 'Updates every 8h',
+    countdownHour: 'h ',
+    countdownMin: 'm ',
+    countdownSec: 's',
+    countdownSuffix: ' until next update',
+    noContent: 'No content available for this source',
+    loadSourceErr: 'Failed to load sources: ',
+    loadContentErr: 'Failed to load content: ',
+    sourceApiErr: 'Sources API returned ',
+    dataApiErr: 'Data API returned ',
+    readOriginal: 'Read More →',
+    viewDiscussion: 'View Discussion →',
+    defaultLabel: 'Latest',
+    footer: '✨ WeChat: 程序员博博 ✨',
+    comments: ' comments',
+  }
+};
 
 const SOURCE_DISPLAY_MAP = {
   'github-daily':  { label: '今日开源热榜', category: 'GitHub · 日榜' },
@@ -122,6 +183,18 @@ const INFOQ_CATEGORY_MAP = {
   'Generative AI': '生成式 AI',
   'AI Development': 'AI 工程实践',
   'Machine Learning': '机器学习',
+};
+
+// ── 英文版来源映射 ──
+const SOURCE_DISPLAY_MAP_EN = {
+  'github-daily':  { label: 'GitHub Daily Trending', category: 'GitHub · Daily' },
+  'github-weekly': { label: 'GitHub Weekly Picks',   category: 'GitHub · Weekly' },
+  'hacker-news':   { label: 'Hacker News Hot',       category: 'Hacker News' },
+  'v2ex':          { label: 'V2EX Hot Topics',       category: 'V2EX' },
+  'tldr-ai':       { label: 'TLDR AI Digest',        category: 'TLDR AI' },
+  'openai':        { label: 'OpenAI Updates',        category: 'Official' },
+  'anthropic':     { label: 'Anthropic Updates',     category: 'Official' },
+  'infoq':         { label: 'AI Engineering',        category: 'InfoQ AI' },
 };
 
 const LANGUAGE_COLORS = {
@@ -169,25 +242,29 @@ export default {
   name: 'App',
   data() {
     return {
+      lang: getInitialLang(),
       sources: [],
       activeSourceId: '',
       items: [],
       generatedAt: '',
       loading: false,
       errorMessage: '',
-      countdownText: '每 8 小时更新',
+      countdownText: '',
       countdownTimer: null
     };
   },
   computed: {
     activeSourceLabel() {
-      const override = SOURCE_DISPLAY_MAP[this.activeSourceId];
+      const map = this.lang === 'en' ? SOURCE_DISPLAY_MAP_EN : SOURCE_DISPLAY_MAP;
+      const override = map[this.activeSourceId];
       if (override) return override.label;
       const source = this.sources.find((s) => s.id === this.activeSourceId);
-      return source ? source.label : '最新内容';
+      return source ? source.label : this.t('defaultLabel');
     }
   },
   async created() {
+    document.title = this.t('siteTitle');
+    this.countdownText = this.t('updateEvery8h');
     await this.loadSources();
   },
   mounted() {
@@ -203,6 +280,18 @@ export default {
     }
   },
   methods: {
+    t(key) {
+      return (I18N[this.lang] && I18N[this.lang][key]) || I18N['zh'][key] || key;
+    },
+    switchLang(newLang) {
+      this.lang = newLang;
+      localStorage.setItem('lang', newLang);
+      const url = new URL(window.location);
+      url.searchParams.set('lang', newLang);
+      history.replaceState(null, '', url);
+      document.title = this.t('siteTitle');
+      this.updateCountdown();
+    },
     updateCountdown() {
       const now = new Date();
       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -230,18 +319,20 @@ export default {
       const seconds = Math.floor((diff % 60000) / 1000);
 
       if (hours > 0) {
-        this.countdownText = hours + '时' + minutes + '分后更新';
+        this.countdownText = hours + this.t('countdownHour') + minutes + this.t('countdownMin') + this.t('countdownSuffix');
       } else if (minutes > 0) {
-        this.countdownText = minutes + '分' + seconds + '秒后更新';
+        this.countdownText = minutes + this.t('countdownMin') + seconds + this.t('countdownSec') + this.t('countdownSuffix');
       } else {
-        this.countdownText = seconds + '秒后更新';
+        this.countdownText = seconds + this.t('countdownSec') + this.t('countdownSuffix');
       }
     },
     getDisplayLabel(source) {
-      return (SOURCE_DISPLAY_MAP[source.id] || source).label;
+      const map = this.lang === 'en' ? SOURCE_DISPLAY_MAP_EN : SOURCE_DISPLAY_MAP;
+      return (map[source.id] || source).label;
     },
     getDisplayCategory(source) {
-      return (SOURCE_DISPLAY_MAP[source.id] || source).category;
+      const map = this.lang === 'en' ? SOURCE_DISPLAY_MAP_EN : SOURCE_DISPLAY_MAP;
+      return (map[source.id] || source).category;
     },
     isHN(item) {
       return item.source === 'Hacker News';
@@ -275,16 +366,16 @@ export default {
         if (meta.stars_period) tags.push({ label: meta.stars_period, type: 'growth' });
       } else if (src === 'Hacker News') {
         if (meta.score != null)    tags.push({ label: '▲ ' + meta.score, type: 'stat' });
-        if (meta.comments != null) tags.push({ label: '💬 ' + meta.comments + ' 评论', type: 'fork' });
+        if (meta.comments != null) tags.push({ label: '💬 ' + meta.comments + this.t('comments'), type: 'fork' });
       } else if (src === 'TLDR AI') {
-        const cat = TLDR_CATEGORY_MAP[item.category];
+        const cat = this.lang === 'en' ? item.category : TLDR_CATEGORY_MAP[item.category];
         if (cat) tags.push({ label: cat, type: 'category' });
       } else if (src === 'OpenAI' || src === 'Anthropic') {
-        const ct = CONTENT_TYPE_MAP[meta.content_type];
+        const ct = this.lang === 'en' ? meta.content_type : CONTENT_TYPE_MAP[meta.content_type];
         if (ct) tags.push({ label: ct, type: 'category' });
         if (item.published_at) tags.push({ label: this.formatDate(item.published_at), type: 'date' });
       } else if (src === 'InfoQ AI Development') {
-        const cat = INFOQ_CATEGORY_MAP[item.category];
+        const cat = this.lang === 'en' ? item.category : INFOQ_CATEGORY_MAP[item.category];
         if (cat) tags.push({ label: cat, type: 'category' });
         if (item.published_at) tags.push({ label: this.formatDate(item.published_at), type: 'date' });
       }
@@ -296,7 +387,7 @@ export default {
       try {
         const response = await fetch(`${API_PREFIX}/sources`);
         if (!response.ok) {
-          throw new Error(`来源接口返回 ${response.status}`);
+          throw new Error(`${this.t('sourceApiErr')}${response.status}`);
         }
         const payload = await response.json();
         this.sources = payload.sources || [];
@@ -304,7 +395,7 @@ export default {
           await this.selectSource(this.sources[0].id);
         }
       } catch (error) {
-        this.errorMessage = `加载来源失败：${error.message}`;
+        this.errorMessage = `${this.t('loadSourceErr')}${error.message}`;
       } finally {
         this.loading = false;
       }
@@ -316,7 +407,7 @@ export default {
       try {
         const response = await fetch(`${API_PREFIX}/sources/${sourceId}/latest`);
         if (!response.ok) {
-          throw new Error(`数据接口返回 ${response.status}`);
+          throw new Error(`${this.t('dataApiErr')}${response.status}`);
         }
         const payload = await response.json();
         this.items = payload.items || [];
@@ -324,7 +415,7 @@ export default {
       } catch (error) {
         this.items = [];
         this.generatedAt = '';
-        this.errorMessage = `加载内容失败：${error.message}`;
+        this.errorMessage = `${this.t('loadContentErr')}${error.message}`;
       } finally {
         this.loading = false;
       }
@@ -444,6 +535,24 @@ a {
   font-size: 12px;
   color: var(--text-3);
   letter-spacing: 0.2px;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.gh-link {
+  display: flex;
+  align-items: center;
+  color: var(--text-3);
+  transition: color 150ms ease;
+}
+
+.gh-link:hover {
+  color: var(--text-1);
 }
 
 .update-chip {
@@ -841,5 +950,40 @@ a {
   font-size: 13px;
   border-top: 1px solid var(--border);
   margin-top: 32px;
+}
+
+/* ── Language Switch ─────────────────────── */
+.lang-switch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.lang-switch button {
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: color 150ms ease, background 150ms ease;
+}
+
+.lang-switch button:hover {
+  color: var(--text-1);
+}
+
+.lang-switch button.active {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.lang-sep {
+  color: var(--text-3);
+  font-size: 13px;
+  user-select: none;
 }
 </style>
