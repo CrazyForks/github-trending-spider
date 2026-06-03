@@ -112,6 +112,10 @@ cd frontend && npm run build
 # https://your-domain.com/api/... → Nginx 反代 → FastAPI :8000
 ```
 
+## 友情链接
+
+- [fish2018/webhtv](https://github.com/fish2018/webhtv)
+
 ## License
 
 [MIT](LICENSE)

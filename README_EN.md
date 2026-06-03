@@ -110,6 +110,10 @@ cd frontend && npm run build
 # https://your-domain.com/api/... → Nginx reverse proxy → FastAPI :8000
 ```
 
+## Friendly Links
+
+- [fish2018/webhtv](https://github.com/fish2018/webhtv)
+
 ## License
 
 [MIT](LICENSE)
