@@ -5,7 +5,8 @@
 
 import json
 import logging
-from datetime import datetime
+import re
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from config import (
@@ -21,6 +22,8 @@ from source_registry import (
 )
 
 logger = logging.getLogger(__name__)
+
+HISTORY_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def build_source_snapshots(items, generated_at=None):
@@ -161,6 +164,87 @@ def load_latest_archive_snapshot(source_id, output_dir=OUTPUT_ARCHIVE_DIR):
     return None
 
 
+def list_recent_history_dates(days=7, output_dir=OUTPUT_ARCHIVE_DIR, today=None):
+    """列出最近 N 天历史归档概览，不包含今天。"""
+    if today is None:
+        today = date.today()
+
+    results = []
+    for offset in range(1, days + 1):
+        target_date = today - timedelta(days=offset)
+        date_text = target_date.isoformat()
+        sources = []
+        for source in SOURCE_DEFINITIONS:
+            batch_file = latest_archive_batch_file(source["id"], date_text, output_dir)
+            if not batch_file:
+                continue
+            snapshot = _read_json_file(batch_file)
+            sources.append({
+                "source": source,
+                "source_id": source["id"],
+                "batch_file": batch_file.name,
+                "item_count": snapshot.get("item_count", 0) if snapshot else 0,
+            })
+
+        results.append({
+            "date": date_text,
+            "has_archive": bool(sources),
+            "source_count": len(sources),
+            "sources": sources,
+        })
+    return results
+
+
+def load_history_archive_snapshot(source_id, date_text, output_dir=OUTPUT_ARCHIVE_DIR):
+    """读取指定来源、指定日期的最新历史归档批次。"""
+    source = get_source_by_id(source_id)
+    if not source:
+        return None, "unknown", ""
+    if not is_valid_history_date(date_text):
+        return None, "invalid-date", ""
+
+    batch_file = latest_archive_batch_file(source_id, date_text, output_dir)
+    if not batch_file:
+        return None, "empty", ""
+
+    snapshot = _read_json_file(batch_file)
+    if not snapshot:
+        return None, "empty", ""
+    return snapshot, "archive-history", batch_file.name
+
+
+def latest_archive_batch_file(source_id, date_text, output_dir=OUTPUT_ARCHIVE_DIR):
+    """返回 output/<source>/<date>/ 下数字文件名最大的 JSON 文件。"""
+    if not is_valid_history_date(date_text):
+        return None
+    source = get_source_by_id(source_id)
+    if not source:
+        return None
+
+    target_dir = Path(output_dir) / source_id / date_text
+    if not target_dir.exists() or not target_dir.is_dir():
+        return None
+
+    files = [
+        path for path in target_dir.glob("*.json")
+        if path.stem.isdigit()
+    ]
+    if not files:
+        return None
+    return sorted(files, key=lambda item: int(item.stem))[-1]
+
+
+def is_valid_history_date(date_text):
+    """校验 YYYY-MM-DD 日期文本。"""
+    if not HISTORY_DATE_PATTERN.match(date_text or ""):
+        return False
+    try:
+        datetime.strptime(date_text, "%Y-%m-%d")
+        return True
+    except ValueError:
+        return False
+
+
 def _next_batch_number(target_dir):
     numbers = []
     for path in target_dir.glob("*.json"):
@@ -173,3 +257,12 @@ def _next_batch_number(target_dir):
 
 def _redis_key(source_id):
     return "{}:source:{}:latest".format(REDIS_KEY_PREFIX, source_id)
+
+
+def _read_json_file(path):
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning("读取归档 JSON 失败: %s", e)
+        return None

@@ -12,7 +12,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from access_log import AccessLogMiddleware, start_stats_reporter
 from config import API_CORS_ORIGINS, API_MAX_ITEMS_PER_SOURCE
-from content_store import load_latest_snapshot
+from content_store import (
+    is_valid_history_date,
+    list_recent_history_dates,
+    load_history_archive_snapshot,
+    load_latest_snapshot,
+)
 from scheduler import start_scheduler, stop_scheduler
 from source_registry import SOURCE_DEFINITIONS, get_source_by_id
 
@@ -65,6 +70,60 @@ def list_sources():
     return {
         "sources": SOURCE_DEFINITIONS,
         "count": len(SOURCE_DEFINITIONS),
+    }
+
+
+@app.get("/api/history/dates")
+def list_history_dates():
+    """返回最近 7 天历史归档日期，不包含今天。"""
+    dates = list_recent_history_dates(days=7)
+    logger.info("[数据] 请求历史归档日期 | 日期数=%d", len(dates))
+    return {
+        "dates": dates,
+        "count": len(dates),
+    }
+
+
+@app.get("/api/history/sources/{source_id}/dates/{date_text}")
+def get_history_source(source_id, date_text):
+    """返回指定日期、指定来源的历史归档快照。"""
+    source = get_source_by_id(source_id)
+    if not source:
+        logger.warning("[数据] 请求了未知历史来源 | source_id=%s", source_id)
+        raise HTTPException(status_code=404, detail="Unknown source")
+    if not is_valid_history_date(date_text):
+        logger.warning("[数据] 请求了非法历史日期 | date=%s", date_text)
+        raise HTTPException(status_code=400, detail="Invalid date")
+
+    snapshot, served_from, batch_file = load_history_archive_snapshot(source_id, date_text)
+    if not snapshot:
+        logger.info(
+            "[数据] 历史来源=%s | 日期=%s | 读取自=无归档 | 条数=0",
+            source_id, date_text,
+        )
+        return {
+            "served_from": served_from,
+            "batch_file": batch_file,
+            "generated_at": "",
+            "source": source,
+            "item_count": 0,
+            "items": [],
+        }
+
+    items = snapshot.get("items", [])[:API_MAX_ITEMS_PER_SOURCE]
+    generated_at = snapshot.get("generated_at", "未知时间")
+    logger.info(
+        "[数据] 历史来源=%s | 日期=%s | 批次=%s | 条数=%d | 数据生成时间=%s",
+        source_id, date_text, batch_file, len(items), generated_at,
+    )
+    return {
+        "served_from": served_from,
+        "batch_file": batch_file,
+        "generated_at": generated_at,
+        "source": snapshot.get("source", source),
+        "item_count": len(items),
+        "total_item_count": snapshot.get("item_count", len(items)),
+        "items": items,
     }
 
 

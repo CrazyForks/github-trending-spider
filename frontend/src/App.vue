@@ -12,6 +12,9 @@
         </div>
       </div>
       <div class="topbar-actions">
+        <button class="history-button" type="button" @click="openHistoryDrawer">
+          {{ t('historyArchive') }}
+        </button>
         <div class="lang-switch">
           <button :class="{ active: lang === 'zh' }" @click="switchLang('zh')">中文</button>
           <span class="lang-sep">|</span>
@@ -23,6 +26,47 @@
         </a>
       </div>
     </header>
+
+    <div
+      class="history-drawer-mask"
+      :class="{ open: historyDrawerOpen }"
+      @click="closeHistoryDrawer"
+    >
+      <aside class="history-drawer" @click.stop>
+        <div class="history-drawer-head">
+          <div>
+            <h2>{{ t('historyDrawerTitle') }}</h2>
+            <p>{{ t('historyDrawerDesc') }}</p>
+          </div>
+          <button class="history-drawer-close" type="button" @click="closeHistoryDrawer">×</button>
+        </div>
+
+        <div v-if="historyDatesLoading" class="history-drawer-state">
+          {{ t('historyLoading') }}
+        </div>
+        <div v-else-if="historyDatesError" class="history-drawer-state error">
+          {{ historyDatesError }}
+        </div>
+        <div v-else class="history-date-list">
+          <button
+            v-for="dateInfo in historyDates"
+            :key="dateInfo.date"
+            class="history-date-row"
+            :class="{
+              active: selectedHistoryDate === dateInfo.date,
+              disabled: !dateInfo.has_archive
+            }"
+            type="button"
+            :disabled="!dateInfo.has_archive"
+            @click="selectHistoryDate(dateInfo)"
+          >
+            <strong>{{ formatHistoryDate(dateInfo.date) }}</strong>
+            <span>{{ getHistoryDateSummary(dateInfo) }}</span>
+            <em>{{ getHistoryDateBatch(dateInfo) }}</em>
+          </button>
+        </div>
+      </aside>
+    </div>
 
     <main class="layout">
       <aside class="source-panel">
@@ -41,7 +85,18 @@
 
       <section class="feed-panel">
         <div class="feed-toolbar">
-          <h2>{{ activeSourceLabel }}</h2>
+          <div>
+            <h2>{{ feedTitle }}</h2>
+            <p v-if="feedSubtitle" class="feed-subtitle">{{ feedSubtitle }}</p>
+          </div>
+          <button
+            v-if="historyMode"
+            class="back-today-button"
+            type="button"
+            @click="backToToday"
+          >
+            {{ t('backToToday') }}
+          </button>
         </div>
 
         <div v-if="loading" class="skeleton-list">
@@ -125,9 +180,23 @@ const I18N = {
     loadContentErr: '加载内容失败：',
     sourceApiErr: '来源接口返回 ',
     dataApiErr: '数据接口返回 ',
+    historyApiErr: '历史接口返回 ',
     readOriginal: '阅读原文 →',
     viewDiscussion: '查看讨论 →',
     defaultLabel: '最新内容',
+    historyArchive: '历史归档',
+    historyDrawerTitle: '历史归档',
+    historyDrawerDesc: '最近 7 天，不包含今天。选择日期后读取当天最后一个归档批次。',
+    historyLoading: '正在加载历史归档',
+    historyLoadErr: '加载历史归档失败：',
+    historyTitle: '历史资讯',
+    backToToday: '返回今日资讯',
+    noArchive: '暂无归档',
+    archiveSources: ' 个来源',
+    archiveBatch: '批次 ',
+    archiveEmptyBatch: '无批次',
+    historySourcePrefix: '当前来源：',
+    historyBatchPrefix: '归档批次：',
     footerEmailEgg: '隐藏小彩蛋: 支持邮件接收AI讯息',
     emailHint: '请将您的邮箱发送至727987105@qq.com',
     comments: ' 评论',
@@ -146,9 +215,23 @@ const I18N = {
     loadContentErr: 'Failed to load content: ',
     sourceApiErr: 'Sources API returned ',
     dataApiErr: 'Data API returned ',
+    historyApiErr: 'History API returned ',
     readOriginal: 'Read More →',
     viewDiscussion: 'View Discussion →',
     defaultLabel: 'Latest',
+    historyArchive: 'Archive',
+    historyDrawerTitle: 'Archive',
+    historyDrawerDesc: 'Last 7 days, excluding today. Dates load the latest archive batch for that day.',
+    historyLoading: 'Loading archive',
+    historyLoadErr: 'Failed to load archive: ',
+    historyTitle: 'Archive',
+    backToToday: 'Back to Today',
+    noArchive: 'No archive',
+    archiveSources: ' sources',
+    archiveBatch: 'Batch ',
+    archiveEmptyBatch: 'No batch',
+    historySourcePrefix: 'Source: ',
+    historyBatchPrefix: 'Batch: ',
     footerEmailEgg: 'Hidden easter egg: Support receiving AI updates by email',
     emailHint: 'Please send your email address to 727987105@qq.com',
     comments: ' comments',
@@ -259,6 +342,13 @@ export default {
       generatedAt: '',
       loading: false,
       errorMessage: '',
+      historyDrawerOpen: false,
+      historyDates: [],
+      historyDatesLoading: false,
+      historyDatesError: '',
+      historyMode: false,
+      selectedHistoryDate: '',
+      historyBatchFile: '',
       countdownText: '',
       countdownTimer: null
     };
@@ -270,6 +360,19 @@ export default {
       if (override) return override.label;
       const source = this.sources.find((s) => s.id === this.activeSourceId);
       return source ? source.label : this.t('defaultLabel');
+    },
+    feedTitle() {
+      if (this.historyMode && this.selectedHistoryDate) {
+        return `${this.t('historyTitle')} · ${this.selectedHistoryDate}`;
+      }
+      return this.activeSourceLabel;
+    },
+    feedSubtitle() {
+      if (!this.historyMode) {
+        return '';
+      }
+      const batchText = this.historyBatchFile || this.t('archiveEmptyBatch');
+      return `${this.t('historySourcePrefix')}${this.activeSourceLabel} · ${this.t('historyBatchPrefix')}${batchText}`;
     }
   },
   async created() {
@@ -304,6 +407,89 @@ export default {
     },
     showEmailHint() {
       window.alert(this.t('emailHint'));
+    },
+    async openHistoryDrawer() {
+      this.historyDrawerOpen = true;
+      if (this.historyDates.length === 0 && !this.historyDatesLoading) {
+        await this.loadHistoryDates();
+      }
+    },
+    closeHistoryDrawer() {
+      this.historyDrawerOpen = false;
+    },
+    async loadHistoryDates() {
+      this.historyDatesLoading = true;
+      this.historyDatesError = '';
+      try {
+        const response = await fetch(`${API_PREFIX}/history/dates`);
+        if (!response.ok) {
+          throw new Error(`${this.t('historyApiErr')}${response.status}`);
+        }
+        const payload = await response.json();
+        this.historyDates = payload.dates || [];
+      } catch (error) {
+        this.historyDates = [];
+        this.historyDatesError = `${this.t('historyLoadErr')}${error.message}`;
+      } finally {
+        this.historyDatesLoading = false;
+      }
+    },
+    async selectHistoryDate(dateInfo) {
+      if (!dateInfo || !dateInfo.has_archive) {
+        return;
+      }
+      this.selectedHistoryDate = dateInfo.date;
+      this.historyMode = true;
+      this.historyDrawerOpen = false;
+      await this.loadHistorySource(this.activeSourceId);
+    },
+    async loadHistorySource(sourceId) {
+      this.activeSourceId = sourceId;
+      this.loading = true;
+      this.errorMessage = '';
+      this.historyBatchFile = '';
+      try {
+        const response = await fetch(`${API_PREFIX}/history/sources/${sourceId}/dates/${this.selectedHistoryDate}`);
+        if (!response.ok) {
+          throw new Error(`${this.t('dataApiErr')}${response.status}`);
+        }
+        const payload = await response.json();
+        this.items = payload.items || [];
+        this.generatedAt = payload.generated_at || '';
+        this.historyBatchFile = payload.batch_file || '';
+      } catch (error) {
+        this.items = [];
+        this.generatedAt = '';
+        this.historyBatchFile = '';
+        this.errorMessage = `${this.t('loadContentErr')}${error.message}`;
+      } finally {
+        this.loading = false;
+      }
+    },
+    async backToToday() {
+      this.historyMode = false;
+      this.selectedHistoryDate = '';
+      this.historyBatchFile = '';
+      await this.selectSource(this.activeSourceId);
+    },
+    formatHistoryDate(dateText) {
+      if (!dateText) {
+        return '';
+      }
+      return dateText.slice(5);
+    },
+    getHistoryDateSummary(dateInfo) {
+      if (!dateInfo.has_archive) {
+        return this.t('noArchive');
+      }
+      return `${dateInfo.source_count}${this.t('archiveSources')}`;
+    },
+    getHistoryDateBatch(dateInfo) {
+      if (!dateInfo.has_archive || !dateInfo.sources || dateInfo.sources.length === 0) {
+        return this.t('archiveEmptyBatch');
+      }
+      const active = dateInfo.sources.find((item) => item.source_id === this.activeSourceId) || dateInfo.sources[0];
+      return `${this.t('archiveBatch')}${active.batch_file}`;
     },
     getDisplaySummary(item) {
       if (this.lang === 'zh') {
@@ -439,6 +625,10 @@ export default {
       }
     },
     async selectSource(sourceId) {
+      if (this.historyMode && this.selectedHistoryDate) {
+        await this.loadHistorySource(sourceId);
+        return;
+      }
       this.activeSourceId = sourceId;
       this.loading = true;
       this.errorMessage = '';
@@ -582,6 +772,25 @@ a {
   flex-shrink: 0;
 }
 
+.history-button {
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 5px 8px;
+  transition: color 150ms ease, background 150ms ease;
+}
+
+.history-button:hover,
+.history-button:focus-visible {
+  background: #F1F3F8;
+  color: var(--primary);
+  outline: none;
+}
+
 .gh-link {
   display: flex;
   align-items: center;
@@ -703,6 +912,10 @@ a {
 }
 
 .feed-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
   padding: 20px 24px 18px;
   border-bottom: 1px solid var(--border);
 }
@@ -714,6 +927,178 @@ a {
   letter-spacing: -0.3px;
   color: var(--text-1);
   font-family: 'Bricolage Grotesque', 'DM Sans', sans-serif;
+}
+
+.feed-subtitle {
+  margin: 6px 0 0;
+  color: var(--text-3);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.back-today-button {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 11px;
+  transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+}
+
+.back-today-button:hover,
+.back-today-button:focus-visible {
+  border-color: #C7D9FF;
+  background: var(--primary-soft);
+  color: var(--primary);
+  outline: none;
+}
+
+/* ── History drawer ───────────────────────── */
+
+.history-drawer-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: none;
+  background: rgba(15, 23, 42, 0.22);
+}
+
+.history-drawer-mask.open {
+  display: block;
+}
+
+.history-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(440px, 100vw);
+  height: 100%;
+  overflow-y: auto;
+  background: var(--surface);
+  box-shadow: -18px 0 40px rgba(15, 23, 42, 0.16);
+}
+
+.history-drawer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-drawer-head h2 {
+  margin: 0;
+  color: var(--text-1);
+  font-size: 20px;
+  line-height: 1.3;
+}
+
+.history-drawer-head p {
+  margin: 6px 0 0;
+  color: var(--text-3);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.history-drawer-close {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.history-drawer-close:hover,
+.history-drawer-close:focus-visible {
+  background: #F7F8FB;
+  outline: none;
+}
+
+.history-date-list {
+  padding: 14px;
+}
+
+.history-date-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 62px;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #F8FAFC;
+  color: var(--text-1);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
+.history-date-row:hover:not(:disabled) {
+  border-color: #C7D9FF;
+  background: #F6F9FF;
+}
+
+.history-date-row.active {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.history-date-row.disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.history-date-row strong {
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.history-date-row span {
+  min-width: 0;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.history-date-row em {
+  color: var(--primary);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.history-date-row.disabled em {
+  color: var(--text-3);
+}
+
+.history-drawer-state {
+  margin: 18px 14px;
+  padding: 22px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--text-3);
+  text-align: center;
+  font-size: 14px;
+}
+
+.history-drawer-state.error {
+  border-color: #FECACA;
+  color: #B91C1C;
+  background: #FEF2F2;
 }
 
 /* ── Feed item ────────────────────────────── */
@@ -935,6 +1320,16 @@ a {
     padding: 4px 10px;
   }
 
+  .topbar-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .history-button {
+    font-size: 12px;
+    padding: 4px 6px;
+  }
+
   .layout {
     display: block;
     padding: 12px 16px 40px;
@@ -970,8 +1365,28 @@ a {
     padding: 16px;
   }
 
+  .feed-toolbar {
+    display: block;
+  }
+
   .feed-item {
     display: block;
+  }
+
+  .back-today-button {
+    margin-top: 12px;
+  }
+
+  .history-drawer {
+    width: 100vw;
+  }
+
+  .history-date-row {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .history-date-row em {
+    grid-column: 2;
   }
 
   .open-link {
