@@ -7,7 +7,7 @@ Nginx 可将 /api/ 反代到本服务，Vue 前端只读取最新来源快照。
 
 import logging
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from access_log import AccessLogMiddleware, start_stats_reporter
@@ -18,6 +18,7 @@ from content_store import (
     load_history_archive_snapshot,
     load_latest_snapshot,
 )
+from rss_builder import build_rss_feed
 from scheduler import start_scheduler, stop_scheduler
 from source_registry import SOURCE_DEFINITIONS, get_source_by_id
 from logging_config import setup_logging
@@ -73,6 +74,35 @@ def list_sources():
         "sources": SOURCE_DEFINITIONS,
         "count": len(SOURCE_DEFINITIONS),
     }
+
+
+@app.get("/api/rss.xml")
+def get_rss_feed():
+    """返回全部来源最新内容的 RSS 2.0 feed。"""
+    snapshots = []
+    for source in SOURCE_DEFINITIONS:
+        source_id = source["id"]
+        try:
+            snapshot, served_from = load_latest_snapshot(source_id)
+        except Exception as e:
+            logger.warning("[RSS] 来源=%s | 读取失败 | 错误=%s", source_id, e)
+            continue
+
+        if not snapshot:
+            logger.info("[RSS] 来源=%s | 读取自=%s | 条数=0", source_id, served_from)
+            continue
+
+        rss_snapshot = dict(snapshot)
+        rss_snapshot["source"] = snapshot.get("source", source)
+        rss_snapshot["items"] = snapshot.get("items", [])[:API_MAX_ITEMS_PER_SOURCE]
+        snapshots.append(rss_snapshot)
+
+    item_count = sum(len(snapshot.get("items", [])) for snapshot in snapshots)
+    logger.info("[RSS] 请求总订阅 | 来源数=%d | 条数=%d", len(snapshots), item_count)
+    return Response(
+        content=build_rss_feed(snapshots),
+        media_type="application/rss+xml; charset=utf-8",
+    )
 
 
 @app.get("/api/history/dates")
