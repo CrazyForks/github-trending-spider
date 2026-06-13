@@ -28,6 +28,8 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
+HN_AI_SUMMARY_FAILED_TEXT = "（AI 总结生成失败）"
+
 
 # =========================================================================
 # 1. 数据获取
@@ -220,36 +222,83 @@ def ai_summarize_hn(stories):
             s["ai_summary"] = "（未配置 AI Token，无法生成总结）"
         return stories
 
-    # 构建 prompt
-    story_text_lines = []
-    for i, s in enumerate(stories, 1):
-        line = "{}. {} [{}]\n   分数: {} | 评论数: {} | 作者: {}".format(
-            i,
-            s.get("title", ""),
-            s.get("url", "https://news.ycombinator.com/item?id={}".format(s.get("id", ""))),
-            s.get("score", 0),
-            s.get("descendants", 0),
-            s.get("by", ""),
-        )
+    try:
+        summaries = _call_hn_ai_api(_build_hn_summary_prompt(stories))
+        missing_indexes = _apply_hn_summaries(stories, summaries)
+        if missing_indexes:
+            _log_missing_hn_summaries(stories, missing_indexes, "首次")
+            retry_prompt = _build_hn_retry_prompt(stories, missing_indexes)
+            retry_summaries = _call_hn_ai_api(retry_prompt, max_retries=3)
+            missing_indexes = _apply_hn_summaries(stories, retry_summaries)
+            if missing_indexes:
+                _log_missing_hn_summaries(stories, missing_indexes, "补偿")
+    except Exception as e:
+        logger.error("HN AI 总结失败: %s", e)
 
-        # 添加评论内容（按热门程度排序）
-        comments = s.get("comments", [])
-        if comments:
-            line += "\n   热门评论（按社区热度排序，排在前面的是最受认可的观点）:"
-            for j, c in enumerate(comments, 1):
-                comment_text = c.get("text", "")
-                if comment_text:
-                    # 截断评论文本以控制 prompt 总长度（防止 413 Payload Too Large）
-                    if len(comment_text) > 300:
-                        comment_text = comment_text[:300] + "..."
-                    line += "\n     热评{} [{}]: {}".format(j, c.get("by", "?"), comment_text)
+    # 确保每个 story 都有 ai_summary 字段
+    for s in stories:
+        if not s.get("ai_summary"):
+            s["ai_summary"] = HN_AI_SUMMARY_FAILED_TEXT
 
-        story_text_lines.append(line)
+    return stories
 
-    stories_text = "\n\n".join(story_text_lines)
 
-    prompt = (
-        "以下是 Hacker News 今日 Top {} 热门帖子及其热门评论。\n"
+def _format_hn_story_for_prompt(story, index):
+    """格式化单个 HN 帖子及评论，供 AI prompt 使用。"""
+    line = "{}. {} [{}]\n   分数: {} | 评论数: {} | 作者: {}".format(
+        index,
+        story.get("title", ""),
+        story.get("url", "https://news.ycombinator.com/item?id={}".format(story.get("id", ""))),
+        story.get("score", 0),
+        story.get("descendants", 0),
+        story.get("by", ""),
+    )
+
+    comments = story.get("comments", [])
+    if comments:
+        line += "\n   热门评论（按社区热度排序，排在前面的是最受认可的观点）:"
+        for comment_index, comment in enumerate(comments, 1):
+            comment_text = comment.get("text", "")
+            if comment_text:
+                if len(comment_text) > 300:
+                    comment_text = comment_text[:300] + "..."
+                line += "\n     热评{} [{}]: {}".format(
+                    comment_index,
+                    comment.get("by", "?"),
+                    comment_text,
+                )
+
+    return line
+
+
+def _build_hn_summary_prompt(stories):
+    """构建 HN 全量摘要 prompt。"""
+    stories_text = "\n\n".join(
+        _format_hn_story_for_prompt(story, index)
+        for index, story in enumerate(stories, 1)
+    )
+    return _build_hn_prompt(
+        "以下是 Hacker News 今日 Top {} 热门帖子及其热门评论。".format(len(stories)),
+        stories_text,
+    )
+
+
+def _build_hn_retry_prompt(stories, missing_indexes):
+    """构建 HN 摘要缺失条目的补偿 prompt。"""
+    stories_text = "\n\n".join(
+        _format_hn_story_for_prompt(stories[index], index + 1)
+        for index in missing_indexes
+    )
+    return _build_hn_prompt(
+        "以下是 Hacker News 摘要中遗漏的帖子。请只补充这些原始 index 的摘要。",
+        stories_text,
+    )
+
+
+def _build_hn_prompt(intro, stories_text):
+    """构建 HN 摘要 prompt。"""
+    return (
+        "{}\n"
         "评论已按社区投票排序，排在前面的观点最受认可。\n\n"
         "请为每个帖子写中文总结（100-150 字），结构如下：\n"
         "1.【主题】一句话说清这个帖子在讨论什么（15 字以内）\n"
@@ -261,7 +310,8 @@ def ai_summarize_hn(stories):
         "- 每个用户观点必须用换行符(\\n)分隔，绝对不要用分号连在一起\n"
         "- 评论引用要具体到观点内容，不要\"大家讨论了性能问题\"这种废话\n"
         "- 让读者看完就知道\"社区对这个事怎么看\"\n"
-        "- 如果帖子本身是 Show HN，先说清楚作者做了什么\n\n"
+        "- 如果帖子本身是 Show HN，先说清楚作者做了什么\n"
+        "- index 必须使用帖子列表中的原始序号，禁止重新从 1 编号\n\n"
         "范例：\n"
         '{{\"index\": 1, \"summary\": \"【SQLite 作者宣布不再接受外部 PR】Hacker News 社区对此反应两极。\\n'
         '用户 jsmith：单人维护反而保证了代码一致性，Linux 初期也是 Linus 一个人\\n'
@@ -270,24 +320,38 @@ def ai_summarize_hn(stories):
         "请严格按照以下 JSON 格式返回，不要包含任何多余内容：\n"
         '{{"summaries": [{{"index": 1, "summary": "中文总结"}}, ...]}}\n\n'
         "帖子列表：\n{}"
-    ).format(len(stories), stories_text)
+    ).format(intro, stories_text)
 
-    try:
-        summaries = _call_hn_ai_api(prompt)
-        if summaries:
-            for item in summaries:
-                idx = item.get("index", 0) - 1
-                if 0 <= idx < len(stories):
-                    stories[idx]["ai_summary"] = item.get("summary", "")
-    except Exception as e:
-        logger.error("HN AI 总结失败: %s", e)
 
-    # 确保每个 story 都有 ai_summary 字段
-    for s in stories:
-        if "ai_summary" not in s:
-            s["ai_summary"] = "（AI 总结生成失败）"
+def _apply_hn_summaries(stories, summaries):
+    """把 AI 返回摘要写回 stories，并返回仍缺失摘要的 story 下标。"""
+    for item in summaries or []:
+        story_index = item.get("index", 0) - 1
+        summary = (item.get("summary") or "").strip()
+        if 0 <= story_index < len(stories) and summary:
+            stories[story_index]["ai_summary"] = summary
+        else:
+            logger.warning("忽略无效 HN AI 摘要项: %s", item)
 
-    return stories
+    return [
+        index
+        for index, story in enumerate(stories)
+        if not story.get("ai_summary")
+    ]
+
+
+def _log_missing_hn_summaries(stories, missing_indexes, phase):
+    """记录 HN 摘要缺失条目，便于远端日志定位。"""
+    missing_titles = [
+        "{}:{}".format(index + 1, stories[index].get("title", ""))
+        for index in missing_indexes
+    ]
+    logger.warning(
+        "HN AI %s摘要缺失 %d 条: %s",
+        phase,
+        len(missing_indexes),
+        " | ".join(missing_titles),
+    )
 
 
 def _call_hn_ai_api(prompt, max_retries=10):

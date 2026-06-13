@@ -237,7 +237,7 @@ const SOURCE_DISPLAY_MAP = {
   'github-weekly': { label: '本周开源精选', category: 'GitHub · 周榜' },
   'hacker-news':   { label: '硅谷社区热议', category: 'Hacker News'   },
   'linux-do':      { label: 'Linux.do 技术日报', category: '社区讨论'     },
-  'v2ex':          { label: '中文技术社区热议', category: 'V2EX'          },
+  'v2ex':          { label: 'V2EX 技术日报', category: 'V2EX'          },
   'tldr-ai':       { label: 'AI 速报精选',   category: 'TLDR AI'       },
   'openai':        { label: 'OpenAI 最新动态', category: '官方更新'    },
   'anthropic':     { label: 'Anthropic 最新动态', category: '官方更新' },
