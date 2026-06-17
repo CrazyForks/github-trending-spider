@@ -408,6 +408,16 @@ export default {
     closeHistoryDrawer() {
       this.historyDrawerOpen = false;
     },
+    resetFeedScroll() {
+      const feedPanel = document.querySelector('.feed-panel');
+      if (!feedPanel) {
+        window.scrollTo({ top: 0, behavior: 'auto' });
+        return;
+      }
+
+      const targetTop = window.scrollY + feedPanel.getBoundingClientRect().top - 84;
+      window.scrollTo({ top: Math.max(0, targetTop), behavior: 'auto' });
+    },
     async loadHistoryDates() {
       this.historyDatesLoading = true;
       this.historyDatesError = '';
@@ -438,6 +448,7 @@ export default {
       this.activeSourceId = sourceId;
       this.loading = true;
       this.errorMessage = '';
+      let shouldResetScroll = false;
       try {
         const response = await fetch(`${API_PREFIX}/history/sources/${sourceId}/dates/${this.selectedHistoryDate}`);
         if (!response.ok) {
@@ -446,12 +457,18 @@ export default {
         const payload = await response.json();
         this.items = payload.items || [];
         this.generatedAt = payload.generated_at || '';
+        shouldResetScroll = true;
       } catch (error) {
         this.items = [];
         this.generatedAt = '';
         this.errorMessage = `${this.t('loadContentErr')}${error.message}`;
+        shouldResetScroll = true;
       } finally {
         this.loading = false;
+      }
+      if (shouldResetScroll) {
+        await this.$nextTick();
+        this.resetFeedScroll();
       }
     },
     async backToToday() {
@@ -612,6 +629,7 @@ export default {
       this.activeSourceId = sourceId;
       this.loading = true;
       this.errorMessage = '';
+      let shouldResetScroll = false;
       try {
         const response = await fetch(`${API_PREFIX}/sources/${sourceId}/latest`);
         if (!response.ok) {
@@ -620,12 +638,18 @@ export default {
         const payload = await response.json();
         this.items = payload.items || [];
         this.generatedAt = payload.generated_at || '';
+        shouldResetScroll = true;
       } catch (error) {
         this.items = [];
         this.generatedAt = '';
         this.errorMessage = `${this.t('loadContentErr')}${error.message}`;
+        shouldResetScroll = true;
       } finally {
         this.loading = false;
+      }
+      if (shouldResetScroll) {
+        await this.$nextTick();
+        this.resetFeedScroll();
       }
     }
   }
