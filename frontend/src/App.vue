@@ -30,6 +30,7 @@
         </div>
         <div
           class="update-chip"
+          :class="{ 'update-chip--compact-mobile': lang === 'en' }"
           :title="countdownFullText"
           :aria-label="countdownFullText"
         >
@@ -585,6 +586,9 @@ export default {
         this.countdownText = seconds + this.t('countdownSec');
       }
       this.countdownFullText = this.countdownText + this.t('countdownSuffix');
+      if (this.lang === 'zh') {
+        this.countdownText = this.countdownFullText;
+      }
     },
     getDisplayLabel(source) {
       const map = this.lang === 'en' ? SOURCE_DISPLAY_MAP_EN : SOURCE_DISPLAY_MAP;
@@ -1491,6 +1495,11 @@ a {
   }
 
   .update-chip {
+    font-size: 11px;
+    padding: 4px 10px;
+  }
+
+  .update-chip--compact-mobile {
     width: 32px;
     min-width: 32px;
     height: 32px;
@@ -1499,7 +1508,7 @@ a {
     font-size: 14px;
   }
 
-  .update-chip-text {
+  .update-chip--compact-mobile .update-chip-text {
     display: none;
   }
 
