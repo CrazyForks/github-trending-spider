@@ -1,5 +1,5 @@
 <template>
-  <div class="app-shell">
+  <div class="app-shell" :class="'theme-' + theme">
     <header class="topbar">
       <div class="brand">
         <div class="brand-mark-wrapper">
@@ -12,18 +12,31 @@
         </div>
       </div>
       <div class="topbar-actions">
-        <div class="lang-switch">
-          <button :class="{ active: lang === 'zh' }" @click="switchLang('zh')">中文</button>
-          <span class="lang-sep">|</span>
-          <button :class="{ active: lang === 'en' }" @click="switchLang('en')">EN</button>
+        <div class="preference-group">
+          <div class="lang-switch">
+            <button :class="{ active: lang === 'zh' }" @click="switchLang('zh')">中文</button>
+            <span class="lang-sep">|</span>
+            <button :class="{ active: lang === 'en' }" @click="switchLang('en')">EN</button>
+          </div>
+          <button
+            class="theme-toggle"
+            type="button"
+            :aria-label="themeToggleLabel"
+            :title="themeToggleLabel"
+            @click="toggleTheme"
+          >
+            <span>{{ themeToggleIcon }}</span>
+          </button>
         </div>
         <div class="update-chip">⏱ {{ countdownText }}</div>
-        <button class="history-button" type="button" @click="openHistoryDrawer">
-          {{ t('historyArchive') }}
-        </button>
-        <a class="gh-link" href="https://github.com/wenbochang888/github-trending-spider" target="_blank" rel="noreferrer" aria-label="GitHub 仓库">
-          <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-        </a>
+        <div class="utility-group">
+          <button class="history-button" type="button" @click="openHistoryDrawer">
+            {{ t('historyArchive') }}
+          </button>
+          <a class="gh-link" href="https://github.com/wenbochang888/github-trending-spider" target="_blank" rel="noreferrer" aria-label="GitHub 仓库">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          </a>
+        </div>
       </div>
     </header>
 
@@ -154,6 +167,7 @@
 
 <script>
 const API_PREFIX = '/api';
+const THEME_STORAGE_KEY = 'theme';
 
 // ── i18n：语言优先级 URL 参数 > localStorage > 默认 'zh' ──
 function getInitialLang() {
@@ -163,6 +177,16 @@ function getInitialLang() {
   const stored = localStorage.getItem('lang');
   if (stored === 'en' || stored === 'zh') return stored;
   return 'zh';
+}
+
+function getInitialTheme() {
+  const stored = localStorage.getItem(THEME_STORAGE_KEY);
+  if (stored === 'light' || stored === 'dark') return stored;
+
+  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    return 'dark';
+  }
+  return 'light';
 }
 
 const I18N = {
@@ -195,6 +219,8 @@ const I18N = {
     historySourcePrefix: '当前来源：',
     footerEmailEgg: '隐藏小彩蛋: 支持邮件接收AI讯息',
     emailHint: '请将您的邮箱发送至727987105@qq.com',
+    switchToDark: '切换到深色模式',
+    switchToLight: '切换到浅色模式',
     comments: ' 评论',
     replies: ' 回复',
   },
@@ -227,6 +253,8 @@ const I18N = {
     historySourcePrefix: 'Source: ',
     footerEmailEgg: 'Hidden easter egg: Support receiving AI updates by email',
     emailHint: 'Please send your email address to 727987105@qq.com',
+    switchToDark: 'Switch to dark mode',
+    switchToLight: 'Switch to light mode',
     comments: ' comments',
     replies: ' replies',
   }
@@ -329,6 +357,7 @@ export default {
   data() {
     return {
       lang: getInitialLang(),
+      theme: getInitialTheme(),
       sources: [],
       activeSourceId: '',
       items: [],
@@ -364,6 +393,12 @@ export default {
         return '';
       }
       return `${this.t('historySourcePrefix')}${this.activeSourceLabel}`;
+    },
+    themeToggleLabel() {
+      return this.theme === 'dark' ? this.t('switchToLight') : this.t('switchToDark');
+    },
+    themeToggleIcon() {
+      return this.theme === 'dark' ? '☀' : '☾';
     }
   },
   async created() {
@@ -395,6 +430,10 @@ export default {
       history.replaceState(null, '', url);
       document.title = this.t('siteTitle');
       this.updateCountdown();
+    },
+    toggleTheme() {
+      this.theme = this.theme === 'dark' ? 'light' : 'dark';
+      localStorage.setItem(THEME_STORAGE_KEY, this.theme);
     },
     showEmailHint() {
       window.alert(this.t('emailHint'));
@@ -667,6 +706,37 @@ export default {
   --text-2:        #4B5563;
   --text-3:        #9CA3AF;
   --brand-grad:    linear-gradient(135deg, #0057FF 0%, #7C3AED 100%);
+  --body-pattern:  #C8D0DE;
+  --topbar-bg:     rgba(255, 255, 255, 0.92);
+  --preference-bg: #FBFCFF;
+  --control-bg:    #F1F3F8;
+  --control-hover: #F7F8FB;
+  --hover-bg:      #F6F9FF;
+  --accent-border: #C7D9FF;
+  --active-muted:  #6B9BFF;
+  --drawer-mask:   rgba(15, 23, 42, 0.22);
+  --drawer-shadow: -18px 0 40px rgba(15, 23, 42, 0.16);
+  --history-row-bg:#F8FAFC;
+  --error-border:  #FECACA;
+  --error-text:    #B91C1C;
+  --error-bg:      #FEF2F2;
+  --tag-lang-bg:   #F3F4F6;
+  --tag-lang-text: #374151;
+  --tag-lang-bd:   #E5E7EB;
+  --tag-stat-bg:   #FFFBEB;
+  --tag-stat-text: #92400E;
+  --tag-stat-bd:   #FDE68A;
+  --tag-fork-bg:   #F0F4FF;
+  --tag-fork-text: #3B5BDB;
+  --tag-fork-bd:   #C5D0FA;
+  --tag-growth-bg: #F0FDF4;
+  --tag-growth-text:#166534;
+  --tag-growth-bd: #BBF7D0;
+  --tag-date-bg:   #F9FAFB;
+  --tag-date-text: #6B7280;
+  --tag-date-bd:   #E5E7EB;
+  --skeleton-grad: linear-gradient(90deg, #EAECF0 25%, #F5F6F8 50%, #EAECF0 75%);
+  --footer-hover:  rgba(15, 23, 42, 0.05);
   --radius-card:   10px;
   --shadow-card:   0 1px 3px rgba(0, 0, 0, .06), 0 4px 12px rgba(0, 0, 0, .04);
 }
@@ -678,9 +748,7 @@ export default {
 body {
   margin: 0;
   color: var(--text-1);
-  background: var(--bg);
-  background-image: radial-gradient(circle, #c8d0de 1px, transparent 1px);
-  background-size: 28px 28px;
+  background: #F2F5FA;
   font-family: 'DM Sans', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
@@ -691,6 +759,56 @@ a {
 
 .app-shell {
   min-height: 100vh;
+  color: var(--text-1);
+  background: var(--bg);
+  background-image: radial-gradient(circle, var(--body-pattern) 1px, transparent 1px);
+  background-size: 28px 28px;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+.theme-dark {
+  color-scheme: dark;
+  --primary:       #7AA2FF;
+  --primary-soft:  rgba(122, 162, 255, 0.14);
+  --bg:            #0D1117;
+  --surface:       #151B23;
+  --border:        #30363D;
+  --text-1:        #F0F6FC;
+  --text-2:        #C9D1D9;
+  --text-3:        #8B949E;
+  --brand-grad:    linear-gradient(135deg, #2F81F7 0%, #A371F7 100%);
+  --body-pattern:  rgba(139, 148, 158, 0.18);
+  --topbar-bg:     rgba(13, 17, 23, 0.9);
+  --preference-bg: #111820;
+  --control-bg:    #21262D;
+  --control-hover: #262C36;
+  --hover-bg:      rgba(122, 162, 255, 0.08);
+  --accent-border: rgba(122, 162, 255, 0.42);
+  --active-muted:  #9DB8FF;
+  --drawer-mask:   rgba(0, 0, 0, 0.5);
+  --drawer-shadow: -18px 0 42px rgba(0, 0, 0, 0.42);
+  --history-row-bg:#111820;
+  --error-border:  rgba(248, 113, 113, 0.38);
+  --error-text:    #FCA5A5;
+  --error-bg:      rgba(127, 29, 29, 0.18);
+  --tag-lang-bg:   #21262D;
+  --tag-lang-text: #C9D1D9;
+  --tag-lang-bd:   #30363D;
+  --tag-stat-bg:   rgba(180, 83, 9, 0.18);
+  --tag-stat-text: #FCD34D;
+  --tag-stat-bd:   rgba(245, 158, 11, 0.32);
+  --tag-fork-bg:   rgba(59, 130, 246, 0.16);
+  --tag-fork-text: #93C5FD;
+  --tag-fork-bd:   rgba(96, 165, 250, 0.32);
+  --tag-growth-bg: rgba(22, 101, 52, 0.18);
+  --tag-growth-text:#86EFAC;
+  --tag-growth-bd: rgba(74, 222, 128, 0.28);
+  --tag-date-bg:   #161B22;
+  --tag-date-text: #AAB4C0;
+  --tag-date-bd:   #30363D;
+  --skeleton-grad: linear-gradient(90deg, #1C2128 25%, #252B34 50%, #1C2128 75%);
+  --footer-hover:  rgba(201, 209, 217, 0.08);
+  --shadow-card:   0 1px 3px rgba(0, 0, 0, .24), 0 10px 28px rgba(0, 0, 0, .24);
 }
 
 /* ── Topbar ───────────────────────────────── */
@@ -705,7 +823,7 @@ a {
   gap: 16px;
   padding: 0 32px;
   height: 64px;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--topbar-bg);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border);
@@ -772,8 +890,23 @@ a {
 .topbar-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   flex-shrink: 0;
+}
+
+.preference-group,
+.utility-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.preference-group {
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--preference-bg);
 }
 
 .history-button {
@@ -790,7 +923,7 @@ a {
 
 .history-button:hover,
 .history-button:focus-visible {
-  background: #F1F3F8;
+  background: var(--control-bg);
   color: var(--primary);
   outline: none;
 }
@@ -806,10 +939,40 @@ a {
   color: var(--text-1);
 }
 
+.theme-toggle {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+}
+
+.preference-group .theme-toggle {
+  border-color: transparent;
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.theme-toggle:hover,
+.theme-toggle:focus-visible {
+  border-color: var(--accent-border);
+  background: var(--primary-soft);
+  color: var(--primary);
+  outline: none;
+}
+
 .update-chip {
   padding: 5px 13px;
   border-radius: 20px;
-  background: #F1F3F8;
+  background: var(--control-bg);
   color: var(--text-2);
   font-size: 12px;
   font-weight: 500;
@@ -894,7 +1057,7 @@ a {
 }
 
 .source-tab.active small {
-  color: #6B9BFF;
+  color: var(--active-muted);
 }
 
 .source-tab.active::before {
@@ -902,7 +1065,7 @@ a {
 }
 
 .source-tab:hover:not(.active) {
-  background: #F7F8FB;
+  background: var(--control-hover);
 }
 
 /* ── Feed panel ───────────────────────────── */
@@ -955,7 +1118,7 @@ a {
 
 .back-today-button:hover,
 .back-today-button:focus-visible {
-  border-color: #C7D9FF;
+  border-color: var(--accent-border);
   background: var(--primary-soft);
   color: var(--primary);
   outline: none;
@@ -968,7 +1131,7 @@ a {
   inset: 0;
   z-index: 20;
   display: none;
-  background: rgba(15, 23, 42, 0.22);
+  background: var(--drawer-mask);
 }
 
 .history-drawer-mask.open {
@@ -983,7 +1146,7 @@ a {
   height: 100%;
   overflow-y: auto;
   background: var(--surface);
-  box-shadow: -18px 0 40px rgba(15, 23, 42, 0.16);
+  box-shadow: var(--drawer-shadow);
 }
 
 .history-drawer-head {
@@ -1024,7 +1187,7 @@ a {
 
 .history-drawer-close:hover,
 .history-drawer-close:focus-visible {
-  background: #F7F8FB;
+  background: var(--control-hover);
   outline: none;
 }
 
@@ -1043,7 +1206,7 @@ a {
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #F8FAFC;
+  background: var(--history-row-bg);
   color: var(--text-1);
   cursor: pointer;
   text-align: left;
@@ -1051,8 +1214,8 @@ a {
 }
 
 .history-date-row:hover:not(:disabled) {
-  border-color: #C7D9FF;
-  background: #F6F9FF;
+  border-color: var(--accent-border);
+  background: var(--hover-bg);
 }
 
 .history-date-row.active {
@@ -1088,9 +1251,9 @@ a {
 }
 
 .history-drawer-state.error {
-  border-color: #FECACA;
-  color: #B91C1C;
-  background: #FEF2F2;
+  border-color: var(--error-border);
+  color: var(--error-text);
+  background: var(--error-bg);
 }
 
 /* ── Feed item ────────────────────────────── */
@@ -1121,7 +1284,7 @@ a {
 }
 
 .feed-item:hover {
-  background: #F6F9FF;
+  background: var(--hover-bg);
 }
 
 .feed-item:hover::before {
@@ -1174,9 +1337,9 @@ a {
 
 /* 语言 tag — 灰色胶囊 + 彩色圆点 */
 .item-tag--lang {
-  background: #F3F4F6;
-  color: #374151;
-  border-color: #E5E7EB;
+  background: var(--tag-lang-bg);
+  color: var(--tag-lang-text);
+  border-color: var(--tag-lang-bd);
 }
 
 /* 圆点 */
@@ -1190,37 +1353,37 @@ a {
 
 /* Stars — 暖金 */
 .item-tag--stat {
-  background: #FFFBEB;
-  color: #92400E;
-  border-color: #FDE68A;
+  background: var(--tag-stat-bg);
+  color: var(--tag-stat-text);
+  border-color: var(--tag-stat-bd);
 }
 
 /* Forks / 评论 — 蓝灰 */
 .item-tag--fork {
-  background: #F0F4FF;
-  color: #3B5BDB;
-  border-color: #C5D0FA;
+  background: var(--tag-fork-bg);
+  color: var(--tag-fork-text);
+  border-color: var(--tag-fork-bd);
 }
 
 /* Stars today — 绿色 */
 .item-tag--growth {
-  background: #F0FDF4;
-  color: #166534;
-  border-color: #BBF7D0;
+  background: var(--tag-growth-bg);
+  color: var(--tag-growth-text);
+  border-color: var(--tag-growth-bd);
 }
 
 /* 分类 — 主色蓝 */
 .item-tag--category {
   background: var(--primary-soft);
   color: var(--primary);
-  border-color: #C7D9FF;
+  border-color: var(--accent-border);
 }
 
 /* 日期 — 中性灰 */
 .item-tag--date {
-  background: #F9FAFB;
-  color: #6B7280;
-  border-color: #E5E7EB;
+  background: var(--tag-date-bg);
+  color: var(--tag-date-text);
+  border-color: var(--tag-date-bd);
 }
 
 .open-link {
@@ -1256,7 +1419,7 @@ a {
 
 .skeleton-line {
   border-radius: 6px;
-  background: linear-gradient(90deg, #EAECF0 25%, #F5F6F8 50%, #EAECF0 75%);
+  background: var(--skeleton-grad);
   background-size: 600px 100%;
   animation: shimmer 1.4s infinite linear;
 }
@@ -1291,9 +1454,9 @@ a {
 }
 
 .state-box.error {
-  border-color: #FECACA;
-  color: #B91C1C;
-  background: #FEF2F2;
+  border-color: var(--error-border);
+  color: var(--error-text);
+  background: var(--error-bg);
 }
 
 /* ── Mobile ───────────────────────────────── */
@@ -1315,6 +1478,7 @@ a {
   .topbar-actions {
     flex-wrap: wrap;
     justify-content: flex-end;
+    gap: 8px;
   }
 
   .history-button {
@@ -1403,7 +1567,7 @@ a {
 .footer-easter-egg:hover,
 .footer-easter-egg:focus-visible {
   color: var(--text-1);
-  background: rgba(15, 23, 42, 0.05);
+  background: var(--footer-hover);
   outline: none;
 }
 
