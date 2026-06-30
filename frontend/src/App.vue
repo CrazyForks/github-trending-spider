@@ -28,7 +28,14 @@
             <span>{{ themeToggleIcon }}</span>
           </button>
         </div>
-        <div class="update-chip">⏱ {{ countdownText }}</div>
+        <div
+          class="update-chip"
+          :title="countdownFullText"
+          :aria-label="countdownFullText"
+        >
+          <span class="update-chip-icon">⏱</span>
+          <span class="update-chip-text">{{ countdownText }}</span>
+        </div>
         <div class="utility-group">
           <button class="history-button" type="button" @click="openHistoryDrawer">
             {{ t('historyArchive') }}
@@ -371,6 +378,7 @@ export default {
       historyMode: false,
       selectedHistoryDate: '',
       countdownText: '',
+      countdownFullText: '',
       countdownTimer: null
     };
   },
@@ -404,6 +412,7 @@ export default {
   async created() {
     document.title = this.t('siteTitle');
     this.countdownText = this.t('updateEvery8h');
+    this.countdownFullText = this.t('updateEvery8h');
     await this.loadSources();
   },
   mounted() {
@@ -569,12 +578,13 @@ export default {
       const seconds = Math.floor((diff % 60000) / 1000);
 
       if (hours > 0) {
-        this.countdownText = hours + this.t('countdownHour') + minutes + this.t('countdownMin') + this.t('countdownSuffix');
+        this.countdownText = hours + this.t('countdownHour') + minutes + this.t('countdownMin');
       } else if (minutes > 0) {
-        this.countdownText = minutes + this.t('countdownMin') + seconds + this.t('countdownSec') + this.t('countdownSuffix');
+        this.countdownText = minutes + this.t('countdownMin') + seconds + this.t('countdownSec');
       } else {
-        this.countdownText = seconds + this.t('countdownSec') + this.t('countdownSuffix');
+        this.countdownText = seconds + this.t('countdownSec');
       }
+      this.countdownFullText = this.countdownText + this.t('countdownSuffix');
     },
     getDisplayLabel(source) {
       const map = this.lang === 'en' ? SOURCE_DISPLAY_MAP_EN : SOURCE_DISPLAY_MAP;
@@ -970,14 +980,24 @@ a {
 }
 
 .update-chip {
-  padding: 5px 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 76px;
+  padding: 5px 12px;
   border-radius: 20px;
   background: var(--control-bg);
   color: var(--text-2);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+.update-chip-icon,
+.update-chip-text {
+  line-height: 1;
 }
 
 /* ── Layout ───────────────────────────────── */
@@ -1471,8 +1491,16 @@ a {
   }
 
   .update-chip {
-    font-size: 11px;
-    padding: 4px 10px;
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+    gap: 0;
+    padding: 0;
+    font-size: 14px;
+  }
+
+  .update-chip-text {
+    display: none;
   }
 
   .topbar-actions {
