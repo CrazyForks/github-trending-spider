@@ -176,6 +176,7 @@
 <script>
 const API_PREFIX = '/api';
 const THEME_STORAGE_KEY = 'theme';
+const MOBILE_LAYOUT_QUERY = '(max-width: 860px)';
 
 // ── i18n：语言优先级 URL 参数 > localStorage > 默认 'zh' ──
 function getInitialLang() {
@@ -458,6 +459,10 @@ export default {
       this.historyDrawerOpen = false;
     },
     resetFeedScroll() {
+      if (window.matchMedia && window.matchMedia(MOBILE_LAYOUT_QUERY).matches) {
+        return;
+      }
+
       const feedPanel = document.querySelector('.feed-panel');
       if (!feedPanel) {
         window.scrollTo({ top: 0, behavior: 'auto' });
