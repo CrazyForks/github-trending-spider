@@ -645,7 +645,6 @@ export default {
       } else if (src === 'Linux.do') {
         if (meta.section_title) tags.push({ label: meta.section_title, type: 'category' });
         if (meta.reply_count != null) tags.push({ label: '💬 ' + meta.reply_count + this.t('replies'), type: 'fork' });
-        if (item.published_at) tags.push({ label: this.formatDate(item.published_at), type: 'date' });
       } else if (src === 'TLDR AI') {
         const cat = this.lang === 'en' ? item.category : TLDR_CATEGORY_MAP[item.category];
         if (cat) tags.push({ label: cat, type: 'category' });
