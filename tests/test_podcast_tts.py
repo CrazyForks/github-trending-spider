@@ -14,6 +14,7 @@ sys.path.insert(0, ".")
 from podcast_tts import (  # noqa: E402
     _prepare_tts_text,
     _segment_paths_with_turn_pause,
+    _synthesize_edge_segment,
     synthesize_podcast,
 )
 
@@ -73,6 +74,28 @@ class TestPodcastTts(unittest.TestCase):
 
         self.assertEqual(paths, [first, target_dir / "turn-pause.mp3", second])
         ensure_silence.assert_called_once()
+
+    def test_synthesize_edge_segment_retries_and_removes_empty_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "001-male.mp3"
+            attempts = {"count": 0}
+
+            def fail_then_succeed(text, voice, path, rate, pitch, volume):
+                attempts["count"] += 1
+                if attempts["count"] == 1:
+                    output_path.write_bytes(b"")
+                    raise RuntimeError("No audio was received")
+                output_path.write_bytes(b"mp3")
+
+            with patch("podcast_tts.PODCAST_TTS_MAX_RETRIES", 2), \
+                    patch("podcast_tts.PODCAST_TTS_RETRY_SECONDS", 1), \
+                    patch("podcast_tts.time.sleep") as sleep, \
+                    patch("podcast_tts._synthesize_edge_segment_once", side_effect=fail_then_succeed) as synthesize:
+                _synthesize_edge_segment("台词", "voice", output_path)
+
+                self.assertEqual(output_path.read_bytes(), b"mp3")
+                self.assertEqual(synthesize.call_count, 2)
+                sleep.assert_called_once()
 
     def test_empty_turns_fail(self):
         with tempfile.TemporaryDirectory() as temp_dir:

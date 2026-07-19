@@ -138,7 +138,7 @@
           </div>
           <div v-else-if="podcastError" class="state-box error">{{ podcastError }}</div>
           <div v-else-if="!latestPodcast" class="state-box">
-            {{ t('podcastEmpty') }}
+            {{ podcastEmptyText }}
           </div>
           <div v-else>
             <section class="podcast-episode">
@@ -293,6 +293,7 @@ const I18N = {
     podcastNavCategory: '自动音频日报',
     podcastTitle: '今日 AI 播客',
     podcastEmpty: '今日播客生成中',
+    podcastHistoryEmpty: '该日期播客尚未生成',
     podcastLoadErr: '加载播客失败：',
     podcastKicker: '最新一期 · 自动生成',
     podcastSources: '个来源',
@@ -336,6 +337,7 @@ const I18N = {
     podcastNavCategory: 'Auto audio digest',
     podcastTitle: 'Daily AI Podcast',
     podcastEmpty: 'Podcast is being generated',
+    podcastHistoryEmpty: 'Podcast has not been generated for this date',
     podcastLoadErr: 'Failed to load podcast: ',
     podcastKicker: 'Latest episode · Auto-generated',
     podcastSources: 'sources',
@@ -492,6 +494,12 @@ export default {
         return '';
       }
       return `${this.t('historySourcePrefix')}${this.activeSourceLabel}`;
+    },
+    podcastEmptyText() {
+      if (this.podcastMode && this.historyMode) {
+        return this.t('podcastHistoryEmpty');
+      }
+      return this.t('podcastEmpty');
     },
     themeToggleLabel() {
       return this.theme === 'dark' ? this.t('switchToLight') : this.t('switchToDark');
@@ -661,6 +669,10 @@ export default {
       this.podcastError = '';
       try {
         const response = await fetch(`${API_PREFIX}/podcast/dates/${dateText}`);
+        if (response.status === 404) {
+          this.latestPodcast = null;
+          return;
+        }
         if (!response.ok) {
           throw new Error(`${this.t('dataApiErr')}${response.status}`);
         }

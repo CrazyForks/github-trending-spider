@@ -8,11 +8,14 @@ import logging
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from config import (
     PODCAST_TURN_PAUSE_SECONDS,
+    PODCAST_TTS_MAX_RETRIES,
     PODCAST_TTS_PROVIDER,
+    PODCAST_TTS_RETRY_SECONDS,
     PODCAST_VOICE_FEMALE_PITCH,
     PODCAST_VOICE_FEMALE_RATE,
     PODCAST_VOICE_FEMALE_VOLUME,
@@ -101,6 +104,39 @@ def _prepare_tts_text(text):
 
 
 def _synthesize_edge_segment(text, voice, output_path, rate="+0%", pitch="+0Hz", volume="+0%"):
+    max_retries = max(1, PODCAST_TTS_MAX_RETRIES)
+    last_error = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            _synthesize_edge_segment_once(text, voice, output_path, rate, pitch, volume)
+            if not output_path.exists() or output_path.stat().st_size == 0:
+                raise RuntimeError("TTS 生成了空音频文件")
+            return
+        except Exception as e:
+            last_error = e
+            _remove_empty_or_partial_file(output_path)
+            if attempt >= max_retries:
+                logger.error(
+                    "播客语音片段生成失败 | voice=%s | text=%s | error=%s",
+                    voice,
+                    text[:40],
+                    e,
+                )
+                raise
+            logger.warning(
+                "播客语音片段生成失败，准备重试 | voice=%s | attempt=%d/%d | text=%s | error=%s",
+                voice,
+                attempt,
+                max_retries,
+                text[:40],
+                e,
+            )
+            _sleep_before_tts_retry(attempt)
+
+    raise last_error
+
+
+def _synthesize_edge_segment_once(text, voice, output_path, rate, pitch, volume):
     async def _run():
         import edge_tts
 
@@ -115,6 +151,19 @@ def _synthesize_edge_segment(text, voice, output_path, rate="+0%", pitch="+0Hz",
 
     logger.info("生成播客语音片段: %s", output_path)
     asyncio.run(_run())
+
+
+def _remove_empty_or_partial_file(path):
+    try:
+        Path(path).unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _sleep_before_tts_retry(attempt):
+    seconds = PODCAST_TTS_RETRY_SECONDS * attempt
+    if seconds > 0:
+        time.sleep(seconds)
 
 
 def _merge_segments(segment_paths, output_path):

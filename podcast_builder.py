@@ -6,6 +6,7 @@
 import json
 import logging
 import re
+import time
 from datetime import datetime, timedelta
 
 import requests
@@ -17,8 +18,10 @@ from config import (
     PODCAST_ENABLED,
     PODCAST_EXCLUDED_SOURCE_IDS,
     PODCAST_MAX_DURATION_MINUTES,
+    PODCAST_SCRIPT_MAX_RETRIES,
     PODCAST_SCRIPT_MODEL,
     PODCAST_SCRIPT_PROVIDER,
+    PODCAST_SCRIPT_RETRY_SECONDS,
     PODCAST_TARGET_DATE_MODE,
 )
 from content_store import load_history_archive_snapshot
@@ -26,6 +29,7 @@ from podcast_store import (
     acquire_podcast_lock,
     build_failed_metadata,
     has_successful_podcast,
+    load_podcast_script,
     podcast_dir,
     release_podcast_lock,
     write_podcast_metadata,
@@ -74,8 +78,10 @@ def run_podcast_generation(scheduled_time=None, output_dir=OUTPUT_ARCHIVE_DIR):
         if item_count == 0:
             raise RuntimeError("{} 没有可用于生成播客的归档内容".format(date_text))
 
-        script = build_podcast_script(date_text, snapshots)
-        write_podcast_script(date_text, script, output_dir)
+        script = load_reusable_podcast_script(date_text, output_dir)
+        if not script:
+            script = build_podcast_script(date_text, snapshots)
+            write_podcast_script(date_text, script, output_dir)
 
         tts_result = synthesize_podcast(script.get("turns", []), podcast_dir(date_text, output_dir))
         metadata = {
@@ -158,6 +164,22 @@ def build_podcast_script(date_text, snapshots):
     return _normalize_script_payload(date_text, payload)
 
 
+def load_reusable_podcast_script(date_text, output_dir=OUTPUT_ARCHIVE_DIR):
+    """失败重跑时优先复用已生成且合法的脚本，避免重复调用模型。"""
+    payload = load_podcast_script(date_text, output_dir)
+    if not payload:
+        return None
+
+    try:
+        script = _normalize_script_payload(date_text, payload)
+    except Exception as e:
+        logger.warning("[播客] %s 已有脚本不可复用，将重新生成: %s", date_text, e)
+        return None
+
+    logger.info("[播客] %s 复用已有播客脚本", date_text)
+    return script
+
+
 def _build_script_prompt(date_text, snapshots):
     lines = []
     for snapshot in snapshots:
@@ -221,15 +243,64 @@ def _call_script_ai_api(prompt):
         "temperature": 0.4,
         "max_tokens": 6000,
     }
-    response = requests.post(
-        "{}/chat/completions".format(AI_API_URL),
-        headers=headers,
-        json=payload,
-        timeout=90,
+    url = "{}/chat/completions".format(AI_API_URL)
+    max_retries = max(1, PODCAST_SCRIPT_MAX_RETRIES)
+    last_error = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = requests.post(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=90,
+            )
+            if _is_retryable_status(response.status_code) and attempt < max_retries:
+                logger.warning(
+                    "[播客] 脚本生成 API 临时失败 | status=%s | attempt=%d/%d",
+                    response.status_code,
+                    attempt,
+                    max_retries,
+                )
+                _sleep_before_retry(attempt)
+                continue
+
+            response.raise_for_status()
+            content = response.json()["choices"][0]["message"]["content"]
+            return _parse_json_response(content)
+        except requests.exceptions.RequestException as e:
+            last_error = e
+            if not _is_retryable_request_error(e) or attempt >= max_retries:
+                raise
+            logger.warning(
+                "[播客] 脚本生成 API 网络异常，准备重试 | error=%s | attempt=%d/%d",
+                e,
+                attempt,
+                max_retries,
+            )
+            _sleep_before_retry(attempt)
+
+    raise last_error or RuntimeError("播客脚本生成失败")
+
+
+def _is_retryable_status(status_code):
+    return status_code in (429, 500, 502, 503, 504)
+
+
+def _is_retryable_request_error(error):
+    return isinstance(
+        error,
+        (
+            requests.exceptions.ConnectionError,
+            requests.exceptions.SSLError,
+            requests.exceptions.Timeout,
+        ),
     )
-    response.raise_for_status()
-    content = response.json()["choices"][0]["message"]["content"]
-    return _parse_json_response(content)
+
+
+def _sleep_before_retry(attempt):
+    seconds = PODCAST_SCRIPT_RETRY_SECONDS * attempt
+    if seconds > 0:
+        time.sleep(seconds)
 
 
 def _parse_json_response(content):

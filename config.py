@@ -227,6 +227,8 @@ PODCAST_HISTORY_DAYS = int(os.environ.get("PODCAST_HISTORY_DAYS", "7"))
 # 播客脚本生成使用 GitHub Models，默认复用本项目既有 AI 模型。
 PODCAST_SCRIPT_PROVIDER = os.environ.get("PODCAST_SCRIPT_PROVIDER", "github_models")
 PODCAST_SCRIPT_MODEL = os.environ.get("PODCAST_SCRIPT_MODEL", AI_MODEL)
+PODCAST_SCRIPT_MAX_RETRIES = int(os.environ.get("PODCAST_SCRIPT_MAX_RETRIES", "5"))
+PODCAST_SCRIPT_RETRY_SECONDS = float(os.environ.get("PODCAST_SCRIPT_RETRY_SECONDS", "5"))
 
 # 播客生成时排除的来源 ID，逗号分隔。只影响播客，不影响普通资讯展示和归档。
 PODCAST_EXCLUDED_SOURCE_IDS = os.environ.get(
@@ -244,6 +246,8 @@ PODCAST_VOICE_FEMALE_PITCH = os.environ.get("PODCAST_VOICE_FEMALE_PITCH", "+0Hz"
 PODCAST_VOICE_MALE_VOLUME = os.environ.get("PODCAST_VOICE_MALE_VOLUME", "+0%")
 PODCAST_VOICE_FEMALE_VOLUME = os.environ.get("PODCAST_VOICE_FEMALE_VOLUME", "+0%")
 PODCAST_TURN_PAUSE_SECONDS = float(os.environ.get("PODCAST_TURN_PAUSE_SECONDS", "0.4"))
+PODCAST_TTS_MAX_RETRIES = int(os.environ.get("PODCAST_TTS_MAX_RETRIES", "3"))
+PODCAST_TTS_RETRY_SECONDS = float(os.environ.get("PODCAST_TTS_RETRY_SECONDS", "3"))
 
 # 控制脚本长度，目标生成 5-8 分钟音频。
 PODCAST_MAX_DURATION_MINUTES = int(os.environ.get("PODCAST_MAX_DURATION_MINUTES", "8"))

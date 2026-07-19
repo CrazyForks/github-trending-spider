@@ -100,6 +100,8 @@ All config via environment variables with sensible defaults:
 | `PODCAST_SCHEDULE_TIME` | 02:30 | Daily podcast generation time |
 | `PODCAST_TARGET_DATE_MODE` | yesterday | Generate the previous day's podcast |
 | `PODCAST_EXCLUDED_SOURCE_IDS` | tldr-ai,infoq | Comma-separated source IDs excluded from podcast generation |
+| `PODCAST_SCRIPT_MAX_RETRIES` | 5 | Max retries for transient podcast script API failures |
+| `PODCAST_SCRIPT_RETRY_SECONDS` | 5 | Base retry interval in seconds for podcast script API calls |
 | `PODCAST_TTS_PROVIDER` | edge_tts | TTS provider for the first version |
 | `PODCAST_VOICE_MALE` | zh-CN-YunxiNeural | Male voice |
 | `PODCAST_VOICE_FEMALE` | zh-CN-XiaoxiaoNeural | Female voice |
@@ -110,6 +112,8 @@ All config via environment variables with sensible defaults:
 | `PODCAST_VOICE_MALE_VOLUME` | +0% | Male voice volume passed to edge-tts |
 | `PODCAST_VOICE_FEMALE_VOLUME` | +0% | Female voice volume passed to edge-tts |
 | `PODCAST_TURN_PAUSE_SECONDS` | 0.4 | Short pause inserted between dialogue turns |
+| `PODCAST_TTS_MAX_RETRIES` | 3 | Max retries for a transient single-segment TTS failure |
+| `PODCAST_TTS_RETRY_SECONDS` | 3 | Base retry interval in seconds for single-segment TTS |
 | `PODCAST_MAX_DURATION_MINUTES` | 8 | Target maximum podcast duration |
 
 Daily podcast generation also requires the system command `ffmpeg` and the Python package `edge-tts`. Script generation reuses `GITHUB_TOKEN` for GitHub Models and does not require `OPENAI_API_KEY`.

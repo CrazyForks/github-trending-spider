@@ -201,6 +201,8 @@ GET https://www.gdufe888.top/api/sources/{source_id}/latest
 | `PODCAST_SCHEDULE_TIME` | 02:30 | 每天生成播客的时间 |
 | `PODCAST_TARGET_DATE_MODE` | yesterday | 生成前一天内容的播客 |
 | `PODCAST_EXCLUDED_SOURCE_IDS` | tldr-ai,infoq | 播客生成时排除的来源 ID，逗号分隔 |
+| `PODCAST_SCRIPT_MAX_RETRIES` | 5 | 播客脚本生成 API 临时失败时最大重试次数 |
+| `PODCAST_SCRIPT_RETRY_SECONDS` | 5 | 播客脚本生成 API 重试基础间隔秒数，实际按次数递增 |
 | `PODCAST_TTS_PROVIDER` | edge_tts | 第一版使用 edge-tts 合成语音 |
 | `PODCAST_VOICE_MALE` | zh-CN-YunxiNeural | 男声 voice |
 | `PODCAST_VOICE_FEMALE` | zh-CN-XiaoxiaoNeural | 女声 voice |
@@ -211,6 +213,8 @@ GET https://www.gdufe888.top/api/sources/{source_id}/latest
 | `PODCAST_VOICE_MALE_VOLUME` | +0% | 男声音量，传给 edge-tts |
 | `PODCAST_VOICE_FEMALE_VOLUME` | +0% | 女声音量，传给 edge-tts |
 | `PODCAST_TURN_PAUSE_SECONDS` | 0.4 | 每轮对话拼接时插入的短停顿秒数 |
+| `PODCAST_TTS_MAX_RETRIES` | 3 | 单段 TTS 临时失败时最大重试次数 |
+| `PODCAST_TTS_RETRY_SECONDS` | 3 | 单段 TTS 重试基础间隔秒数，实际按次数递增 |
 | `PODCAST_MAX_DURATION_MINUTES` | 8 | 播客目标最长分钟数 |
 
 每日播客还需要安装系统命令 `ffmpeg`，并在 Python 依赖中安装 `edge-tts`。脚本生成复用 `GITHUB_TOKEN` 调用 GitHub Models，不需要 `OPENAI_API_KEY`。

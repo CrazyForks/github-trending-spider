@@ -166,6 +166,12 @@ def write_podcast_script(date_text, script, output_dir=OUTPUT_ARCHIVE_DIR):
     write_json_file(podcast_script_path(date_text, output_dir), script)
 
 
+def load_podcast_script(date_text, output_dir=OUTPUT_ARCHIVE_DIR):
+    if not is_valid_podcast_date(date_text):
+        return None
+    return read_json_file(podcast_script_path(date_text, output_dir))
+
+
 def write_podcast_metadata(metadata, output_dir=OUTPUT_ARCHIVE_DIR):
     date_text = metadata.get("date", "")
     if not is_valid_podcast_date(date_text):

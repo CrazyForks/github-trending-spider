@@ -4,6 +4,7 @@
 """
 
 import json
+import requests
 import sys
 import tempfile
 import unittest
@@ -15,12 +16,17 @@ sys.path.insert(0, ".")
 
 from podcast_builder import (  # noqa: E402
     _build_script_prompt,
+    _call_script_ai_api,
     _normalize_script_payload,
     load_podcast_source_snapshots,
     resolve_target_content_date,
     run_podcast_generation,
 )
-from podcast_store import load_podcast_metadata, write_podcast_metadata  # noqa: E402
+from podcast_store import (  # noqa: E402
+    load_podcast_metadata,
+    write_podcast_metadata,
+    write_podcast_script,
+)
 
 
 class TestPodcastBuilder(unittest.TestCase):
@@ -154,6 +160,33 @@ class TestPodcastBuilder(unittest.TestCase):
             self.assertEqual(result["status"], "success")
             self.assertEqual(metadata["summary"], "")
 
+    def test_generation_reuses_existing_valid_script(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self._write_archive(temp_dir)
+            script = {
+                "title": "已生成脚本",
+                "summary": "已有脚本可以复用。",
+                "chapters": [{"time": "00:00", "title": "今日主线"}],
+                "turns": [
+                    {"role": "male", "text": "直接复用这一段。"},
+                    {"role": "female", "text": "不用重新请求模型。"},
+                ],
+            }
+            write_podcast_script("2026-07-19", script, output_dir=temp_dir)
+
+            with patch("podcast_builder.PODCAST_ENABLED", True), \
+                    patch("podcast_builder.build_podcast_script", side_effect=AssertionError("should not call AI")), \
+                    patch("podcast_builder.synthesize_podcast", return_value={"duration_seconds": 123}):
+                result = run_podcast_generation(
+                    scheduled_time=datetime(2026, 7, 20, 2, 30, 0),
+                    output_dir=temp_dir,
+                )
+
+            metadata = load_podcast_metadata("2026-07-19", output_dir=temp_dir)
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(metadata["title"], "已生成脚本")
+            self.assertEqual(metadata["summary"], "已有脚本可以复用。")
+
     def test_normalize_script_payload_filters_invalid_turns(self):
         payload = {
             "turns": [
@@ -188,6 +221,46 @@ class TestPodcastBuilder(unittest.TestCase):
         self.assertIn("每个 turns 元素只写一个角色的一小轮话", prompt)
         self.assertIn("不要使用模板化播报腔", prompt)
         self.assertIn("不要朗读 URL", prompt)
+
+    def test_call_script_ai_api_retries_transient_ssl_error(self):
+        class FakeResponse:
+            status_code = 200
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "turns": [
+                                            {"role": "male", "text": "重试后成功。"}
+                                        ]
+                                    }
+                                )
+                            }
+                        }
+                    ]
+                }
+
+        with patch("podcast_builder.PODCAST_SCRIPT_MAX_RETRIES", 2), \
+                patch("podcast_builder.PODCAST_SCRIPT_RETRY_SECONDS", 1), \
+                patch("podcast_builder.time.sleep") as sleep, \
+                patch(
+                    "podcast_builder.requests.post",
+                    side_effect=[
+                        requests.exceptions.SSLError("ssl eof"),
+                        FakeResponse(),
+                    ],
+                ) as post:
+            payload = _call_script_ai_api("prompt")
+
+        self.assertEqual(payload["turns"][0]["text"], "重试后成功。")
+        self.assertEqual(post.call_count, 2)
+        sleep.assert_called_once()
 
 
 if __name__ == "__main__":
