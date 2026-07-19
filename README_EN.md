@@ -40,7 +40,7 @@ Live demo: **https://www.gdufe888.top/ai/?lang=en**
 - **Archival** — Permanent disk archives + Redis 3-day hot cache
 - **Fault Tolerant** — Each source fails independently without blocking others
 - **Built-in Scheduler** — In-process scheduler, 3 collections per day by default
-- **Daily AI Podcast** — Optional two-host audio digest generated from selected sources in the previous day's archive
+- **Daily AI Podcast** — Optional audio digest generated from selected sources in the previous day's archive
 - **Vue Frontend** — Card-based news feed with skeleton loading and responsive design
 
 ## Quick Start
@@ -70,6 +70,8 @@ cd frontend && npm install && npm run serve
 curl http://localhost:8000/api/health              # Health check
 curl http://localhost:8000/api/sources             # Source list
 curl http://localhost:8000/api/sources/github-daily/latest  # Single source data
+curl http://localhost:8000/api/podcast/latest      # Latest podcast metadata
+curl http://localhost:8000/api/podcast/dates/2026-07-18  # Podcast metadata by date
 ```
 
 ## Architecture
@@ -101,6 +103,13 @@ All config via environment variables with sensible defaults:
 | `PODCAST_TTS_PROVIDER` | edge_tts | TTS provider for the first version |
 | `PODCAST_VOICE_MALE` | zh-CN-YunxiNeural | Male voice |
 | `PODCAST_VOICE_FEMALE` | zh-CN-XiaoxiaoNeural | Female voice |
+| `PODCAST_VOICE_MALE_RATE` | -4% | Male voice rate passed to edge-tts |
+| `PODCAST_VOICE_FEMALE_RATE` | +2% | Female voice rate passed to edge-tts |
+| `PODCAST_VOICE_MALE_PITCH` | -2Hz | Male voice pitch passed to edge-tts |
+| `PODCAST_VOICE_FEMALE_PITCH` | +0Hz | Female voice pitch passed to edge-tts |
+| `PODCAST_VOICE_MALE_VOLUME` | +0% | Male voice volume passed to edge-tts |
+| `PODCAST_VOICE_FEMALE_VOLUME` | +0% | Female voice volume passed to edge-tts |
+| `PODCAST_TURN_PAUSE_SECONDS` | 0.4 | Short pause inserted between dialogue turns |
 | `PODCAST_MAX_DURATION_MINUTES` | 8 | Target maximum podcast duration |
 
 Daily podcast generation also requires the system command `ffmpeg` and the Python package `edge-tts`. Script generation reuses `GITHUB_TOKEN` for GitHub Models and does not require `OPENAI_API_KEY`.

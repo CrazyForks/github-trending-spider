@@ -28,6 +28,7 @@ from podcast_store import (
     is_valid_podcast_date,
     list_podcast_history,
     load_latest_podcast_metadata,
+    load_podcast_metadata,
 )
 
 setup_logging()
@@ -192,6 +193,25 @@ def get_podcast_history():
     return {
         "podcasts": podcasts,
         "count": len(podcasts),
+    }
+
+
+@app.get("/api/podcast/dates/{date_text}")
+def get_podcast_by_date(date_text):
+    """返回指定内容日期的每日 AI 播客元数据。"""
+    if not is_valid_podcast_date(date_text):
+        logger.warning("[播客] 请求了非法播客日期 | date=%s", date_text)
+        raise HTTPException(status_code=400, detail="Invalid date")
+
+    metadata = load_podcast_metadata(date_text)
+    if not metadata or metadata.get("status") != "success":
+        logger.warning("[播客] 请求了不存在的播客元数据 | date=%s", date_text)
+        raise HTTPException(status_code=404, detail="Podcast not found")
+
+    logger.info("[播客] 请求历史播客 | 日期=%s", date_text)
+    return {
+        "status": metadata.get("status", "success"),
+        "podcast": metadata,
     }
 
 

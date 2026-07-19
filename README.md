@@ -40,7 +40,7 @@
 - **按来源归档** — 磁盘永久保留 + Redis 3 天热数据缓存
 - **独立容错** — 任一源失败不影响其他源输出
 - **内置定时采集** — FastAPI 进程内调度器，默认每天 3 次
-- **每日 AI 播客** — 可选开启，凌晨自动生成前一天重点资讯的男女对话音频摘要
+- **每日 AI 播客** — 可选开启，凌晨自动生成前一天重点资讯音频摘要
 - **Vue 前端** — 卡片式资讯流，骨架屏加载，响应式设计
 
 ## 快速开始
@@ -74,6 +74,8 @@ FastAPI 提供只读 JSON 接口，前端页面和外部系统都可以直接读
 curl http://localhost:8000/api/health                         # 健康检查
 curl http://localhost:8000/api/sources                        # 来源列表
 curl http://localhost:8000/api/sources/github-daily/latest    # 单来源最新数据
+curl http://localhost:8000/api/podcast/latest                 # 最新播客元数据
+curl http://localhost:8000/api/podcast/dates/2026-07-18       # 指定日期播客元数据
 ```
 
 线上 API base：
@@ -88,6 +90,9 @@ https://www.gdufe888.top/api
 GET https://www.gdufe888.top/api/health
 GET https://www.gdufe888.top/api/sources
 GET https://www.gdufe888.top/api/sources/{source_id}/latest
+GET https://www.gdufe888.top/api/podcast/latest
+GET https://www.gdufe888.top/api/podcast/dates/{date}
+GET https://www.gdufe888.top/api/podcasts/{date}/podcast.mp3
 ```
 
 `source_id` 使用稳定来源 ID，例如：
@@ -199,6 +204,13 @@ GET https://www.gdufe888.top/api/sources/{source_id}/latest
 | `PODCAST_TTS_PROVIDER` | edge_tts | 第一版使用 edge-tts 合成语音 |
 | `PODCAST_VOICE_MALE` | zh-CN-YunxiNeural | 男声 voice |
 | `PODCAST_VOICE_FEMALE` | zh-CN-XiaoxiaoNeural | 女声 voice |
+| `PODCAST_VOICE_MALE_RATE` | -4% | 男声语速，传给 edge-tts |
+| `PODCAST_VOICE_FEMALE_RATE` | +2% | 女声语速，传给 edge-tts |
+| `PODCAST_VOICE_MALE_PITCH` | -2Hz | 男声音调，传给 edge-tts |
+| `PODCAST_VOICE_FEMALE_PITCH` | +0Hz | 女声音调，传给 edge-tts |
+| `PODCAST_VOICE_MALE_VOLUME` | +0% | 男声音量，传给 edge-tts |
+| `PODCAST_VOICE_FEMALE_VOLUME` | +0% | 女声音量，传给 edge-tts |
+| `PODCAST_TURN_PAUSE_SECONDS` | 0.4 | 每轮对话拼接时插入的短停顿秒数 |
 | `PODCAST_MAX_DURATION_MINUTES` | 8 | 播客目标最长分钟数 |
 
 每日播客还需要安装系统命令 `ffmpeg`，并在 Python 依赖中安装 `edge-tts`。脚本生成复用 `GITHUB_TOKEN` 调用 GitHub Models，不需要 `OPENAI_API_KEY`。

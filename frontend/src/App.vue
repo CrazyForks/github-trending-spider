@@ -145,7 +145,7 @@
               <div class="podcast-episode-main">
                 <span class="podcast-kicker">{{ t('podcastKicker') }}</span>
                 <h3>{{ latestPodcast.title }}</h3>
-                <p class="podcast-summary">{{ t('podcastSummary') }}</p>
+                <p v-if="latestPodcast.summary" class="podcast-summary">{{ latestPodcast.summary }}</p>
                 <div class="podcast-meta-row">
                   <span>{{ latestPodcast.date }}</span>
                   <span>{{ formatDuration(latestPodcast.duration_seconds) }}</span>
@@ -295,7 +295,6 @@ const I18N = {
     podcastEmpty: '今日播客生成中',
     podcastLoadErr: '加载播客失败：',
     podcastKicker: '最新一期 · 自动生成',
-    podcastSummary: '基于昨日重点资讯生成男女对话音频，快速回顾开源热点、社区讨论和官方更新。',
     podcastSources: '个来源',
     podcastItems: '条内容',
     podcastChapters: '本期章节',
@@ -339,7 +338,6 @@ const I18N = {
     podcastEmpty: 'Podcast is being generated',
     podcastLoadErr: 'Failed to load podcast: ',
     podcastKicker: 'Latest episode · Auto-generated',
-    podcastSummary: 'A two-host audio digest of yesterday’s key open-source trends, community discussions, and official AI updates.',
     podcastSources: 'sources',
     podcastItems: 'items',
     podcastChapters: 'Chapters',
@@ -478,11 +476,11 @@ export default {
       return this.activeSourceId === PODCAST_SOURCE_ID;
     },
     feedTitle() {
-      if (this.podcastMode) {
-        return this.t('podcastTitle');
-      }
       if (this.historyMode && this.selectedHistoryDate) {
         return `${this.t('historyTitle')} · ${this.selectedHistoryDate}`;
+      }
+      if (this.podcastMode) {
+        return this.t('podcastTitle');
       }
       return this.activeSourceLabel;
     },
@@ -587,6 +585,10 @@ export default {
       this.selectedHistoryDate = dateInfo.date;
       this.historyMode = true;
       this.historyDrawerOpen = false;
+      if (this.podcastMode) {
+        await this.loadPodcastByDate(this.selectedHistoryDate);
+        return;
+      }
       await this.loadHistorySource(this.activeSourceId);
     },
     async loadHistorySource(sourceId) {
@@ -619,6 +621,12 @@ export default {
     async backToToday() {
       this.historyMode = false;
       this.selectedHistoryDate = '';
+      if (this.podcastMode) {
+        await this.loadPodcast();
+        await this.$nextTick();
+        this.resetFeedScroll();
+        return;
+      }
       await this.selectSource(this.activeSourceId);
     },
     async selectPodcast() {
@@ -647,6 +655,25 @@ export default {
       } finally {
         this.podcastLoading = false;
       }
+    },
+    async loadPodcastByDate(dateText) {
+      this.podcastLoading = true;
+      this.podcastError = '';
+      try {
+        const response = await fetch(`${API_PREFIX}/podcast/dates/${dateText}`);
+        if (!response.ok) {
+          throw new Error(`${this.t('dataApiErr')}${response.status}`);
+        }
+        const payload = await response.json();
+        this.latestPodcast = payload.podcast || null;
+      } catch (error) {
+        this.latestPodcast = null;
+        this.podcastError = `${this.t('podcastLoadErr')}${error.message}`;
+      } finally {
+        this.podcastLoading = false;
+      }
+      await this.$nextTick();
+      this.resetFeedScroll();
     },
     formatDuration(seconds) {
       const totalSeconds = Number(seconds || 0);

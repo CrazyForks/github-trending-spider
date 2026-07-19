@@ -5,13 +5,21 @@
 
 import asyncio
 import logging
+import re
 import shutil
 import subprocess
 from pathlib import Path
 
 from config import (
+    PODCAST_TURN_PAUSE_SECONDS,
     PODCAST_TTS_PROVIDER,
+    PODCAST_VOICE_FEMALE_PITCH,
+    PODCAST_VOICE_FEMALE_RATE,
+    PODCAST_VOICE_FEMALE_VOLUME,
     PODCAST_VOICE_FEMALE,
+    PODCAST_VOICE_MALE_PITCH,
+    PODCAST_VOICE_MALE_RATE,
+    PODCAST_VOICE_MALE_VOLUME,
     PODCAST_VOICE_MALE,
 )
 
@@ -35,9 +43,13 @@ def synthesize_podcast(turns, target_dir):
         text = (turn.get("text") or "").strip()
         if not text:
             continue
+        text = _prepare_tts_text(text)
+        if not text:
+            continue
         voice = _voice_for_role(role)
+        voice_options = _voice_options_for_role(role)
         segment_path = segments_dir / "{:03d}-{}.mp3".format(index, role or "speaker")
-        _synthesize_edge_segment(text, voice, segment_path)
+        _synthesize_edge_segment(text, voice, segment_path, **voice_options)
         segment_paths.append(segment_path)
 
     if not segment_paths:
@@ -57,11 +69,48 @@ def _voice_for_role(role):
     return PODCAST_VOICE_MALE
 
 
-def _synthesize_edge_segment(text, voice, output_path):
+def _voice_options_for_role(role):
+    if role == "female":
+        return {
+            "rate": PODCAST_VOICE_FEMALE_RATE,
+            "pitch": PODCAST_VOICE_FEMALE_PITCH,
+            "volume": PODCAST_VOICE_FEMALE_VOLUME,
+        }
+    return {
+        "rate": PODCAST_VOICE_MALE_RATE,
+        "pitch": PODCAST_VOICE_MALE_PITCH,
+        "volume": PODCAST_VOICE_MALE_VOLUME,
+    }
+
+
+def _prepare_tts_text(text):
+    """清理不适合朗读的内容，并用标点制造更自然的短停顿。"""
+    original = " ".join(str(text or "").split())
+    if not original:
+        return ""
+
+    cleaned = original
+    cleaned = re.sub(r"\[[^\]]+\]\([^)]+\)", lambda m: m.group(0).split("]")[0][1:], cleaned)
+    cleaned = re.sub(r"https?://\S+", "", cleaned)
+    cleaned = cleaned.replace("；", "，").replace(";", "，")
+    cleaned = re.sub(r"[。！？!?]{2,}", lambda m: m.group(0)[0], cleaned)
+    cleaned = re.sub(r"([。！？!?])(?=\S)", r"\1 ", cleaned)
+    cleaned = re.sub(r"(?<![，。！？!?])(不过|但是|所以|另外|这里|换句话说|也就是说)", r"，\1", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ，")
+    return cleaned or original
+
+
+def _synthesize_edge_segment(text, voice, output_path, rate="+0%", pitch="+0Hz", volume="+0%"):
     async def _run():
         import edge_tts
 
-        communicate = edge_tts.Communicate(text=text, voice=voice)
+        communicate = edge_tts.Communicate(
+            text=text,
+            voice=voice,
+            rate=rate,
+            pitch=pitch,
+            volume=volume,
+        )
         await communicate.save(str(output_path))
 
     logger.info("生成播客语音片段: %s", output_path)
@@ -72,12 +121,14 @@ def _merge_segments(segment_paths, output_path):
     if not shutil.which("ffmpeg"):
         raise RuntimeError("未找到 ffmpeg，无法合并播客音频")
 
+    merge_paths = _segment_paths_with_turn_pause(segment_paths, output_path.parent)
     list_path = output_path.parent / "segments.txt"
     with list_path.open("w", encoding="utf-8") as f:
-        for segment_path in segment_paths:
+        for segment_path in merge_paths:
             escaped = str(segment_path.resolve()).replace("'", "'\\''")
             f.write("file '{}'\n".format(escaped))
 
+    raw_output_path = output_path.with_name("{}-raw{}".format(output_path.stem, output_path.suffix))
     cmd = [
         "ffmpeg",
         "-y",
@@ -87,13 +138,51 @@ def _merge_segments(segment_paths, output_path):
         "0",
         "-i",
         str(list_path),
+        "-af",
+        "loudnorm=I=-16:TP=-1.5:LRA=11",
+        "-acodec",
+        "libmp3lame",
+        "-b:a",
+        "128k",
+        str(raw_output_path),
+    ]
+    logger.info("合并播客音频: %s", output_path)
+    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    raw_output_path.replace(output_path)
+
+
+def _segment_paths_with_turn_pause(segment_paths, target_dir):
+    if PODCAST_TURN_PAUSE_SECONDS <= 0 or len(segment_paths) <= 1:
+        return segment_paths
+
+    silence_path = Path(target_dir) / "turn-pause.mp3"
+    _ensure_silence_segment(silence_path, PODCAST_TURN_PAUSE_SECONDS)
+
+    merge_paths = []
+    for index, segment_path in enumerate(segment_paths):
+        merge_paths.append(segment_path)
+        if index < len(segment_paths) - 1:
+            merge_paths.append(silence_path)
+    return merge_paths
+
+
+def _ensure_silence_segment(output_path, duration_seconds):
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        "anullsrc=r=32000:cl=mono",
+        "-t",
+        "{:.3f}".format(max(0.05, duration_seconds)),
         "-acodec",
         "libmp3lame",
         "-b:a",
         "128k",
         str(output_path),
     ]
-    logger.info("合并播客音频: %s", output_path)
+    logger.info("生成播客转场静音: %s", output_path)
     subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 

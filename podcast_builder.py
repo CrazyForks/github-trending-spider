@@ -81,6 +81,7 @@ def run_podcast_generation(scheduled_time=None, output_dir=OUTPUT_ARCHIVE_DIR):
         metadata = {
             "date": date_text,
             "title": script.get("title") or "{} AI 音频日报".format(date_text),
+            "summary": script.get("summary", ""),
             "audio_url": "/api/podcasts/{}/podcast.mp3".format(date_text),
             "duration_seconds": tts_result.get("duration_seconds", 0),
             "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -176,15 +177,27 @@ def _build_script_prompt(date_text, snapshots):
         lines.append("")
 
     return (
-        "请把以下 {} 的 AI 技术资讯整理成一段中文男女对话播客脚本。\n"
+        "请把以下 {} 的 AI 技术资讯改写成一段中文双人播客脚本。\n"
         "目标音频时长不超过 {} 分钟。\n"
+        "整体风格：像两个熟悉 AI 基础设施和后端工程的人在录一段真实节目，"
+        "不是新闻播报，也不是把摘要逐条朗读。\n"
         "要求：\n"
-        "1. 固定 5 段：片头、开源热榜、社区讨论、官方更新、今日行动建议。\n"
-        "2. 输出男女对话，不要机械朗读新闻，要解释为什么后端工程师应该在意。\n"
-        "3. 每句不要太长，适合 TTS 朗读。\n"
-        "4. 严格返回 JSON，不要包含 Markdown。\n"
+        "1. 保留 5 个章节：片头、开源热榜、社区讨论、官方更新、今日行动建议；"
+        "章节标题可以更口语，但语义不要偏离。\n"
+        "2. 每个 turns 元素只写一个角色的一小轮话，建议 1 到 3 个短句；"
+        "多用追问、补充、确认、轻微转折和自然承接，避免一人连续讲很长。\n"
+        "3. 不要使用模板化播报腔。尽量少写“值得关注”“从后端角度看”“今天我们看到”"
+        "“接下来我们来看”“总的来说”等 AI 常见套话。\n"
+        "4. 允许少量口语停顿词，例如“嗯”“对”“你看”“这里有个点”，但不要堆砌，"
+        "不要写舞台说明、括号表情或音效说明。\n"
+        "5. 遇到英文项目名、模型名、公司名，保留原文；不要朗读 URL，不要逐字符解释链接。\n"
+        "6. 只挑最有信息密度的内容聊，允许合并同类项；听众应该能听懂为什么这条和工程实践有关。\n"
+        "7. 额外生成 summary：用 50 到 100 个中文词语概括今天的热点，不要写“基于昨天”、"
+        "不要写“男女对话”、不要描述生成方式。\n"
+        "8. 严格返回 JSON，不要包含 Markdown。\n"
         "JSON 格式：\n"
-        "{{\"title\":\"标题\",\"chapters\":[{{\"time\":\"00:00\",\"title\":\"今日主线\"}}],"
+        "{{\"title\":\"标题\",\"summary\":\"50到100个中文词语的热点总结\","
+        "\"chapters\":[{{\"time\":\"00:00\",\"title\":\"今日主线\"}}],"
         "\"turns\":[{{\"role\":\"male\",\"text\":\"男声台词\"}},"
         "{{\"role\":\"female\",\"text\":\"女声台词\"}}]}}\n\n"
         "内容列表：\n{}"
@@ -252,6 +265,7 @@ def _normalize_script_payload(date_text, payload):
     return {
         "date": date_text,
         "title": payload.get("title") or "{} AI 音频日报".format(date_text),
+        "summary": _normalize_summary(payload.get("summary")),
         "chapters": [
             {
                 "time": str(chapter.get("time", "")),
@@ -262,3 +276,8 @@ def _normalize_script_payload(date_text, payload):
         ],
         "turns": turns,
     }
+
+
+def _normalize_summary(value):
+    summary = " ".join(str(value or "").split())
+    return summary[:220]

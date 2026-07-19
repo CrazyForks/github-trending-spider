@@ -187,6 +187,7 @@ def build_failed_metadata(date_text, error, generated_at=None, source_count=0, i
         "generated_at": generated_at,
         "source_count": source_count,
         "item_count": item_count,
+        "summary": "",
         "status": "failed",
         "error": str(error),
         "chapters": [],

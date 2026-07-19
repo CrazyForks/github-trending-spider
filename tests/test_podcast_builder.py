@@ -14,6 +14,8 @@ from unittest.mock import patch
 sys.path.insert(0, ".")
 
 from podcast_builder import (  # noqa: E402
+    _build_script_prompt,
+    _normalize_script_payload,
     load_podcast_source_snapshots,
     resolve_target_content_date,
     run_podcast_generation,
@@ -104,6 +106,7 @@ class TestPodcastBuilder(unittest.TestCase):
             self._write_archive(temp_dir)
             script = {
                 "title": "2026-07-19 AI 音频日报",
+                "summary": "今天的热点集中在 AI 基础设施、开发工具和官方模型更新。",
                 "chapters": [{"time": "00:00", "title": "今日主线"}],
                 "turns": [
                     {"role": "male", "text": "今天先看开源热榜。"},
@@ -122,9 +125,69 @@ class TestPodcastBuilder(unittest.TestCase):
             metadata = load_podcast_metadata("2026-07-19", output_dir=temp_dir)
             self.assertEqual(result["status"], "success")
             self.assertEqual(metadata["status"], "success")
+            self.assertEqual(metadata["summary"], "今天的热点集中在 AI 基础设施、开发工具和官方模型更新。")
             self.assertEqual(metadata["duration_seconds"], 123)
             self.assertEqual(metadata["source_count"], 1)
             self.assertEqual(metadata["item_count"], 1)
+
+    def test_normalize_script_payload_accepts_missing_summary(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self._write_archive(temp_dir)
+            script = {
+                "title": "2026-07-19 AI 音频日报",
+                "chapters": [{"time": "00:00", "title": "今日主线"}],
+                "turns": [
+                    {"role": "male", "text": "今天先看开源热榜。"},
+                    {"role": "female", "text": "这个项目和后端工程很相关。"},
+                ],
+            }
+
+            with patch("podcast_builder.PODCAST_ENABLED", True), \
+                    patch("podcast_builder.build_podcast_script", return_value=script), \
+                    patch("podcast_builder.synthesize_podcast", return_value={"duration_seconds": 123}):
+                result = run_podcast_generation(
+                    scheduled_time=datetime(2026, 7, 20, 2, 30, 0),
+                    output_dir=temp_dir,
+                )
+
+            metadata = load_podcast_metadata("2026-07-19", output_dir=temp_dir)
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(metadata["summary"], "")
+
+    def test_normalize_script_payload_filters_invalid_turns(self):
+        payload = {
+            "turns": [
+                {"role": "male", "text": "这条可以保留。"},
+                {"role": "narrator", "text": "这个角色不支持。"},
+                {"role": "female", "text": "   "},
+            ],
+        }
+
+        script = _normalize_script_payload("2026-07-19", payload)
+
+        self.assertEqual(script["turns"], [{"role": "male", "text": "这条可以保留。"}])
+
+    def test_script_prompt_guides_natural_conversation(self):
+        snapshots = [
+            {
+                "source": {"label": "GitHub 日榜"},
+                "items": [
+                    {
+                        "title": "AI infra project",
+                        "url": "https://example.com/ai",
+                        "chinese_summary": "一个 AI 基础设施项目。",
+                        "backend_focus": "关注队列、缓存和可观测性。",
+                    }
+                ],
+            }
+        ]
+
+        prompt = _build_script_prompt("2026-07-19", snapshots)
+
+        self.assertIn("真实节目", prompt)
+        self.assertIn("每个 turns 元素只写一个角色的一小轮话", prompt)
+        self.assertIn("不要使用模板化播报腔", prompt)
+        self.assertIn("不要朗读 URL", prompt)
 
 
 if __name__ == "__main__":

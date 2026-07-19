@@ -14,7 +14,12 @@ from fastapi.responses import FileResponse
 
 sys.path.insert(0, ".")
 
-from api import get_latest_podcast, get_podcast_audio, get_podcast_history  # noqa: E402
+from api import (  # noqa: E402
+    get_latest_podcast,
+    get_podcast_audio,
+    get_podcast_by_date,
+    get_podcast_history,
+)
 
 
 class TestPodcastApi(unittest.TestCase):
@@ -40,6 +45,27 @@ class TestPodcastApi(unittest.TestCase):
 
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["podcasts"], podcasts)
+
+    def test_get_podcast_by_date_invalid_date_returns_400(self):
+        with self.assertRaises(HTTPException) as ctx:
+            get_podcast_by_date("../../etc/passwd")
+
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    def test_get_podcast_by_date_missing_returns_404(self):
+        with patch("api.load_podcast_metadata", return_value=None):
+            with self.assertRaises(HTTPException) as ctx:
+                get_podcast_by_date("2026-07-19")
+
+        self.assertEqual(ctx.exception.status_code, 404)
+
+    def test_get_podcast_by_date_success(self):
+        metadata = {"date": "2026-07-19", "status": "success"}
+        with patch("api.load_podcast_metadata", return_value=metadata):
+            result = get_podcast_by_date("2026-07-19")
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["podcast"], metadata)
 
     def test_audio_invalid_date_returns_400(self):
         with self.assertRaises(HTTPException) as ctx:
