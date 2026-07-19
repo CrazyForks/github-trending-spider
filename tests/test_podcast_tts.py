@@ -12,6 +12,8 @@ from unittest.mock import patch
 sys.path.insert(0, ".")
 
 from podcast_tts import (  # noqa: E402
+    _merge_paths_and_timeline,
+    _pause_after_turn,
     _prepare_tts_text,
     _segment_paths_with_turn_pause,
     _synthesize_edge_segment,
@@ -38,6 +40,7 @@ class TestPodcastTts(unittest.TestCase):
                     patch("podcast_tts.PODCAST_VOICE_FEMALE_VOLUME", "+2%"), \
                     patch("podcast_tts._synthesize_edge_segment") as synthesize, \
                     patch("podcast_tts._merge_segments") as merge, \
+                    patch("podcast_tts._probe_duration_seconds_float", return_value=1.0), \
                     patch("podcast_tts._probe_duration_seconds", return_value=123):
                 result = synthesize_podcast(turns, temp_dir)
 
@@ -74,6 +77,65 @@ class TestPodcastTts(unittest.TestCase):
 
         self.assertEqual(paths, [first, target_dir / "turn-pause.mp3", second])
         ensure_silence.assert_called_once()
+
+    def test_merge_paths_and_timeline_uses_chapter_pause(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_dir = Path(temp_dir)
+            first = target_dir / "001-male.mp3"
+            second = target_dir / "002-female.mp3"
+
+            with patch("podcast_tts.PODCAST_TURN_PAUSE_SECONDS", 0.8), \
+                    patch("podcast_tts.PODCAST_CHAPTER_PAUSE_SECONDS", 1.6), \
+                    patch("podcast_tts._ensure_silence_segment") as ensure_silence:
+                paths, timeline = _merge_paths_and_timeline(
+                    [
+                        {
+                            "index": 1,
+                            "path": first,
+                            "role": "male",
+                            "chapter": "开场",
+                            "text": "第一段。",
+                            "duration_seconds": 2.0,
+                        },
+                        {
+                            "index": 2,
+                            "path": second,
+                            "role": "female",
+                            "chapter": "开源热榜",
+                            "text": "第二段。",
+                            "duration_seconds": 3.0,
+                        },
+                    ],
+                    target_dir,
+                )
+
+        self.assertEqual(paths, [first, target_dir / "pause-1600ms.mp3", second])
+        self.assertEqual(timeline[0]["start_seconds"], 0.0)
+        self.assertEqual(timeline[1]["start_seconds"], 3.6)
+        ensure_silence.assert_called_once_with(target_dir / "pause-1600ms.mp3", 1.6)
+
+    def test_pause_after_turn_clamps_model_pause(self):
+        with patch("podcast_tts.PODCAST_TURN_PAUSE_SECONDS", 0.8):
+            small_pause = _pause_after_turn(
+                {"pause_after_seconds": 0.1, "chapter": "开场", "text": "第一段。"},
+                {"chapter": "开场", "text": "第二段。"},
+            )
+            large_pause = _pause_after_turn(
+                {"pause_after_seconds": 9, "chapter": "开场", "text": "第一段。"},
+                {"chapter": "开场", "text": "第二段。"},
+            )
+
+        self.assertEqual(small_pause, 0.6)
+        self.assertEqual(large_pause, 2.0)
+
+    def test_old_turns_without_metadata_use_default_pause(self):
+        with patch("podcast_tts.PODCAST_TURN_PAUSE_SECONDS", 0.8):
+            pause = _pause_after_turn(
+                {"text": "第一段。"},
+                {"text": "第二段。"},
+            )
+
+        self.assertEqual(pause, 0.8)
 
     def test_synthesize_edge_segment_retries_and_removes_empty_file(self):
         with tempfile.TemporaryDirectory() as temp_dir:

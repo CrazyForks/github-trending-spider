@@ -106,15 +106,20 @@ All config via environment variables with sensible defaults:
 | `PODCAST_VOICE_MALE` | zh-CN-YunxiNeural | Male voice |
 | `PODCAST_VOICE_FEMALE` | zh-CN-XiaoxiaoNeural | Female voice |
 | `PODCAST_VOICE_MALE_RATE` | -4% | Male voice rate passed to edge-tts |
-| `PODCAST_VOICE_FEMALE_RATE` | +2% | Female voice rate passed to edge-tts |
+| `PODCAST_VOICE_FEMALE_RATE` | 0% | Female voice rate passed to edge-tts |
 | `PODCAST_VOICE_MALE_PITCH` | -2Hz | Male voice pitch passed to edge-tts |
 | `PODCAST_VOICE_FEMALE_PITCH` | +0Hz | Female voice pitch passed to edge-tts |
 | `PODCAST_VOICE_MALE_VOLUME` | +0% | Male voice volume passed to edge-tts |
 | `PODCAST_VOICE_FEMALE_VOLUME` | +0% | Female voice volume passed to edge-tts |
-| `PODCAST_TURN_PAUSE_SECONDS` | 0.4 | Short pause inserted between dialogue turns |
+| `PODCAST_TURN_PAUSE_SECONDS` | 0.8 | Default pause between ordinary dialogue turns |
+| `PODCAST_TOPIC_PAUSE_SECONDS` | 1.1 | Default pause for topic transitions within a chapter |
+| `PODCAST_CHAPTER_PAUSE_SECONDS` | 1.6 | Default pause when switching chapters |
 | `PODCAST_TTS_MAX_RETRIES` | 3 | Max retries for a transient single-segment TTS failure |
 | `PODCAST_TTS_RETRY_SECONDS` | 3 | Base retry interval in seconds for single-segment TTS |
+| `PODCAST_MIN_DURATION_MINUTES` | 4 | Target minimum podcast duration; shorter audio is logged as a warning |
 | `PODCAST_MAX_DURATION_MINUTES` | 8 | Target maximum podcast duration |
+| `PODCAST_MIN_TURN_COUNT` | 30 | Minimum turn count for a newly generated script before one retry |
+| `PODCAST_MIN_SCRIPT_CHARS` | 1600 | Minimum script text characters before one retry |
 
 Daily podcast generation also requires the system command `ffmpeg` and the Python package `edge-tts`. Script generation reuses `GITHUB_TOKEN` for GitHub Models and does not require `OPENAI_API_KEY`.
 Podcast environment variables are read when the backend process starts. Restart the backend after changing `PODCAST_ENABLED` or other podcast settings.

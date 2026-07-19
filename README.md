@@ -207,15 +207,20 @@ GET https://www.gdufe888.top/api/sources/{source_id}/latest
 | `PODCAST_VOICE_MALE` | zh-CN-YunxiNeural | 男声 voice |
 | `PODCAST_VOICE_FEMALE` | zh-CN-XiaoxiaoNeural | 女声 voice |
 | `PODCAST_VOICE_MALE_RATE` | -4% | 男声语速，传给 edge-tts |
-| `PODCAST_VOICE_FEMALE_RATE` | +2% | 女声语速，传给 edge-tts |
+| `PODCAST_VOICE_FEMALE_RATE` | 0% | 女声语速，传给 edge-tts |
 | `PODCAST_VOICE_MALE_PITCH` | -2Hz | 男声音调，传给 edge-tts |
 | `PODCAST_VOICE_FEMALE_PITCH` | +0Hz | 女声音调，传给 edge-tts |
 | `PODCAST_VOICE_MALE_VOLUME` | +0% | 男声音量，传给 edge-tts |
 | `PODCAST_VOICE_FEMALE_VOLUME` | +0% | 女声音量，传给 edge-tts |
-| `PODCAST_TURN_PAUSE_SECONDS` | 0.4 | 每轮对话拼接时插入的短停顿秒数 |
+| `PODCAST_TURN_PAUSE_SECONDS` | 0.8 | 普通对话轮次之间的默认停顿秒数 |
+| `PODCAST_TOPIC_PAUSE_SECONDS` | 1.1 | 同章节内话题转换的默认停顿秒数 |
+| `PODCAST_CHAPTER_PAUSE_SECONDS` | 1.6 | 不同章节切换时的默认停顿秒数 |
 | `PODCAST_TTS_MAX_RETRIES` | 3 | 单段 TTS 临时失败时最大重试次数 |
 | `PODCAST_TTS_RETRY_SECONDS` | 3 | 单段 TTS 重试基础间隔秒数，实际按次数递增 |
+| `PODCAST_MIN_DURATION_MINUTES` | 4 | 播客目标最短分钟数，低于该值会记录告警 |
 | `PODCAST_MAX_DURATION_MINUTES` | 8 | 播客目标最长分钟数 |
+| `PODCAST_MIN_TURN_COUNT` | 30 | 新生成脚本的最低有效对话轮数，不足会重试一次 |
+| `PODCAST_MIN_SCRIPT_CHARS` | 1600 | 新生成脚本的最低台词字符数，不足会重试一次 |
 
 每日播客还需要安装系统命令 `ffmpeg`，并在 Python 依赖中安装 `edge-tts`。脚本生成复用 `GITHUB_TOKEN` 调用 GitHub Models，不需要 `OPENAI_API_KEY`。
 播客相关环境变量在后端进程启动时读取；修改 `PODCAST_ENABLED` 或其他播客配置后，需要重启后端服务才会生效。

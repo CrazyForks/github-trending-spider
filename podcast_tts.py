@@ -12,6 +12,8 @@ import time
 from pathlib import Path
 
 from config import (
+    PODCAST_CHAPTER_PAUSE_SECONDS,
+    PODCAST_TOPIC_PAUSE_SECONDS,
     PODCAST_TURN_PAUSE_SECONDS,
     PODCAST_TTS_MAX_RETRIES,
     PODCAST_TTS_PROVIDER,
@@ -28,6 +30,10 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
+MIN_MODEL_PAUSE_SECONDS = 0.6
+MAX_MODEL_PAUSE_SECONDS = 2.0
+ENDING_TURN_PAUSE_SECONDS = 0.7
+
 
 def synthesize_podcast(turns, target_dir):
     """按男女角色生成音频片段，并合并成 podcast.mp3。"""
@@ -40,7 +46,7 @@ def synthesize_podcast(turns, target_dir):
     segments_dir = target_dir / "segments"
     segments_dir.mkdir(parents=True, exist_ok=True)
 
-    segment_paths = []
+    segment_infos = []
     for index, turn in enumerate(turns, 1):
         role = turn.get("role", "")
         text = (turn.get("text") or "").strip()
@@ -53,16 +59,27 @@ def synthesize_podcast(turns, target_dir):
         voice_options = _voice_options_for_role(role)
         segment_path = segments_dir / "{:03d}-{}.mp3".format(index, role or "speaker")
         _synthesize_edge_segment(text, voice, segment_path, **voice_options)
-        segment_paths.append(segment_path)
+        segment_infos.append(
+            {
+                "index": index,
+                "path": segment_path,
+                "role": role,
+                "text": text,
+                "chapter": _normalize_optional_text(turn.get("chapter")),
+                "pause_after_seconds": turn.get("pause_after_seconds"),
+                "duration_seconds": _probe_duration_seconds_float(segment_path),
+            }
+        )
 
-    if not segment_paths:
+    if not segment_infos:
         raise ValueError("播客脚本没有可合成文本")
 
     output_path = target_dir / "podcast.mp3"
-    _merge_segments(segment_paths, output_path)
+    timeline = _merge_segments(segment_infos, output_path)
     return {
         "audio_path": str(output_path),
         "duration_seconds": _probe_duration_seconds(output_path),
+        "turn_timeline": timeline,
     }
 
 
@@ -166,11 +183,11 @@ def _sleep_before_tts_retry(attempt):
         time.sleep(seconds)
 
 
-def _merge_segments(segment_paths, output_path):
+def _merge_segments(segment_infos, output_path):
     if not shutil.which("ffmpeg"):
         raise RuntimeError("未找到 ffmpeg，无法合并播客音频")
 
-    merge_paths = _segment_paths_with_turn_pause(segment_paths, output_path.parent)
+    merge_paths, timeline = _merge_paths_and_timeline(segment_infos, output_path.parent)
     list_path = output_path.parent / "segments.txt"
     with list_path.open("w", encoding="utf-8") as f:
         for segment_path in merge_paths:
@@ -198,6 +215,7 @@ def _merge_segments(segment_paths, output_path):
     logger.info("合并播客音频: %s", output_path)
     subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     raw_output_path.replace(output_path)
+    return timeline
 
 
 def _segment_paths_with_turn_pause(segment_paths, target_dir):
@@ -213,6 +231,94 @@ def _segment_paths_with_turn_pause(segment_paths, target_dir):
         if index < len(segment_paths) - 1:
             merge_paths.append(silence_path)
     return merge_paths
+
+
+def _merge_paths_and_timeline(segment_infos, target_dir):
+    if not segment_infos:
+        return [], []
+
+    merge_paths = []
+    timeline = []
+    cursor = 0.0
+    for index, info in enumerate(segment_infos):
+        segment_path = info["path"]
+        duration = max(0.0, float(info.get("duration_seconds") or 0))
+        start_seconds = cursor
+        merge_paths.append(segment_path)
+        cursor += duration
+        timeline.append(
+            {
+                "index": info.get("index", index + 1),
+                "role": info.get("role", ""),
+                "chapter": info.get("chapter", ""),
+                "start_seconds": round(start_seconds, 3),
+                "duration_seconds": round(duration, 3),
+                "end_seconds": round(cursor, 3),
+            }
+        )
+
+        if index >= len(segment_infos) - 1:
+            continue
+
+        pause_seconds = _pause_after_turn(info, segment_infos[index + 1])
+        if pause_seconds <= 0:
+            continue
+
+        silence_path = _silence_segment_path(target_dir, pause_seconds)
+        _ensure_silence_segment(silence_path, pause_seconds)
+        merge_paths.append(silence_path)
+        cursor += pause_seconds
+
+    return merge_paths, timeline
+
+
+def _pause_after_turn(current, next_info):
+    requested = _coerce_pause_seconds(current.get("pause_after_seconds"))
+    pause_seconds = requested if requested is not None else PODCAST_TURN_PAUSE_SECONDS
+
+    current_chapter = _normalize_optional_text(current.get("chapter"))
+    next_chapter = _normalize_optional_text(next_info.get("chapter"))
+    if current_chapter and next_chapter and current_chapter != next_chapter:
+        pause_seconds = max(pause_seconds, PODCAST_CHAPTER_PAUSE_SECONDS)
+    elif _looks_like_topic_transition(current.get("text", ""), next_info.get("text", "")):
+        pause_seconds = max(pause_seconds, PODCAST_TOPIC_PAUSE_SECONDS)
+    elif _looks_like_closing_turn(current.get("text", ""), next_info.get("text", "")):
+        pause_seconds = max(pause_seconds, ENDING_TURN_PAUSE_SECONDS)
+
+    return max(0.0, pause_seconds)
+
+
+def _coerce_pause_seconds(value):
+    if value in (None, ""):
+        return None
+    try:
+        return min(MAX_MODEL_PAUSE_SECONDS, max(MIN_MODEL_PAUSE_SECONDS, float(value)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _silence_segment_path(target_dir, duration_seconds):
+    milliseconds = int(round(duration_seconds * 1000))
+    return Path(target_dir) / "pause-{:04d}ms.mp3".format(milliseconds)
+
+
+def _looks_like_topic_transition(text, next_text):
+    combined = "{} {}".format(text or "", next_text or "")
+    return bool(
+        re.search(
+            r"(接下来|然后我们|再看|换个|另一个|官方更新|社区|行动建议|最后一个环节)",
+            combined,
+        )
+    )
+
+
+def _looks_like_closing_turn(text, next_text):
+    combined = "{} {}".format(text or "", next_text or "")
+    return bool(re.search(r"(今天就聊到这里|下期再见|拜拜|感谢.*收听)", combined))
+
+
+def _normalize_optional_text(value):
+    return " ".join(str(value or "").split())
 
 
 def _ensure_silence_segment(output_path, duration_seconds):
@@ -236,8 +342,12 @@ def _ensure_silence_segment(output_path, duration_seconds):
 
 
 def _probe_duration_seconds(audio_path):
+    return int(_probe_duration_seconds_float(audio_path))
+
+
+def _probe_duration_seconds_float(audio_path):
     if not shutil.which("ffprobe"):
-        return 0
+        return 0.0
 
     cmd = [
         "ffprobe",
@@ -257,7 +367,7 @@ def _probe_duration_seconds(audio_path):
             stderr=subprocess.PIPE,
             text=True,
         )
-        return int(float(result.stdout.strip() or "0"))
+        return float(result.stdout.strip() or "0")
     except Exception as e:
         logger.warning("读取播客时长失败: %s", e)
-        return 0
+        return 0.0

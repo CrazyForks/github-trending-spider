@@ -18,6 +18,9 @@ from config import (
     PODCAST_ENABLED,
     PODCAST_EXCLUDED_SOURCE_IDS,
     PODCAST_MAX_DURATION_MINUTES,
+    PODCAST_MIN_DURATION_MINUTES,
+    PODCAST_MIN_SCRIPT_CHARS,
+    PODCAST_MIN_TURN_COUNT,
     PODCAST_SCRIPT_MAX_RETRIES,
     PODCAST_SCRIPT_MODEL,
     PODCAST_SCRIPT_PROVIDER,
@@ -81,21 +84,36 @@ def run_podcast_generation(scheduled_time=None, output_dir=OUTPUT_ARCHIVE_DIR):
         script = load_reusable_podcast_script(date_text, output_dir)
         if not script:
             script = build_podcast_script(date_text, snapshots)
+            retry_script = _retry_script_if_quality_is_low(date_text, snapshots, script)
+            if retry_script:
+                script = retry_script
             write_podcast_script(date_text, script, output_dir)
 
         tts_result = synthesize_podcast(script.get("turns", []), podcast_dir(date_text, output_dir))
+        duration_seconds = tts_result.get("duration_seconds", 0)
+        if duration_seconds and duration_seconds < PODCAST_MIN_DURATION_MINUTES * 60:
+            logger.warning(
+                "[播客] %s 音频时长低于目标下限 | duration=%ss | min=%sm",
+                date_text,
+                duration_seconds,
+                PODCAST_MIN_DURATION_MINUTES,
+            )
         metadata = {
             "date": date_text,
             "title": script.get("title") or "{} AI 音频日报".format(date_text),
             "summary": script.get("summary", ""),
             "audio_url": "/api/podcasts/{}/podcast.mp3".format(date_text),
-            "duration_seconds": tts_result.get("duration_seconds", 0),
+            "duration_seconds": duration_seconds,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "source_count": source_count,
             "item_count": item_count,
             "status": "success",
             "error": "",
-            "chapters": script.get("chapters", []),
+            "chapters": build_timed_chapters(
+                script.get("chapters", []),
+                tts_result.get("turn_timeline", []),
+                duration_seconds,
+            ),
         }
         write_podcast_metadata(metadata, output_dir)
         logger.info("[播客] %s 生成完成", date_text)
@@ -200,7 +218,8 @@ def _build_script_prompt(date_text, snapshots):
 
     return (
         "请把以下 {} 的 AI 技术资讯改写成一段中文双人播客脚本。\n"
-        "目标音频时长不超过 {} 分钟。\n"
+        "目标音频时长控制在 {} 到 {} 分钟，脚本文字总量约 1800 到 2600 个中文字符，"
+        "turns 总轮数约 35 到 50 轮。\n"
         "整体风格：像两个熟悉 AI 基础设施和后端工程的人在录一段真实节目，"
         "不是新闻播报，也不是把摘要逐条朗读。\n"
         "要求：\n"
@@ -216,14 +235,24 @@ def _build_script_prompt(date_text, snapshots):
         "6. 只挑最有信息密度的内容聊，允许合并同类项；听众应该能听懂为什么这条和工程实践有关。\n"
         "7. 额外生成 summary：用 50 到 100 个中文词语概括今天的热点，不要写“基于昨天”、"
         "不要写“男女对话”、不要描述生成方式。\n"
-        "8. 严格返回 JSON，不要包含 Markdown。\n"
+        "8. 每个 turns 元素额外包含 chapter 和 pause_after_seconds："
+        "chapter 必须等于所属章节标题；pause_after_seconds 是本轮后建议停顿秒数，"
+        "普通接话 0.8，话题转换 1.1，章节切换 1.6，收尾 0.7。\n"
+        "9. 严格返回 JSON，不要包含 Markdown。\n"
         "JSON 格式：\n"
         "{{\"title\":\"标题\",\"summary\":\"50到100个中文词语的热点总结\","
         "\"chapters\":[{{\"time\":\"00:00\",\"title\":\"今日主线\"}}],"
-        "\"turns\":[{{\"role\":\"male\",\"text\":\"男声台词\"}},"
-        "{{\"role\":\"female\",\"text\":\"女声台词\"}}]}}\n\n"
+        "\"turns\":[{{\"role\":\"male\",\"chapter\":\"今日主线\","
+        "\"pause_after_seconds\":0.8,\"text\":\"男声台词\"}},"
+        "{{\"role\":\"female\",\"chapter\":\"今日主线\","
+        "\"pause_after_seconds\":1.1,\"text\":\"女声台词\"}}]}}\n\n"
         "内容列表：\n{}"
-    ).format(date_text, PODCAST_MAX_DURATION_MINUTES, "\n".join(lines))
+    ).format(
+        date_text,
+        PODCAST_MIN_DURATION_MINUTES,
+        PODCAST_MAX_DURATION_MINUTES,
+        "\n".join(lines),
+    )
 
 
 def _call_script_ai_api(prompt):
@@ -321,7 +350,14 @@ def _normalize_script_payload(date_text, payload):
         text = (turn.get("text") or "").strip()
         if role not in ("male", "female") or not text:
             continue
-        turns.append({"role": role, "text": text})
+        normalized_turn = {"role": role, "text": text}
+        chapter = _normalize_text(turn.get("chapter"))
+        if chapter:
+            normalized_turn["chapter"] = chapter
+        pause_after_seconds = _parse_optional_float(turn.get("pause_after_seconds"))
+        if pause_after_seconds is not None:
+            normalized_turn["pause_after_seconds"] = pause_after_seconds
+        turns.append(normalized_turn)
 
     if not turns:
         raise ValueError("播客脚本没有有效台词")
@@ -352,3 +388,98 @@ def _normalize_script_payload(date_text, payload):
 def _normalize_summary(value):
     summary = " ".join(str(value or "").split())
     return summary[:220]
+
+
+def _retry_script_if_quality_is_low(date_text, snapshots, script):
+    issues = _script_quality_issues(script)
+    if not issues:
+        return None
+
+    logger.warning("[播客] %s 脚本质量不足，准备重试一次 | issues=%s", date_text, ",".join(issues))
+    retry_script = build_podcast_script(date_text, snapshots)
+    retry_issues = _script_quality_issues(retry_script)
+    if retry_issues:
+        logger.warning(
+            "[播客] %s 脚本重试后仍未达到目标，将使用重试结果 | issues=%s",
+            date_text,
+            ",".join(retry_issues),
+        )
+    return retry_script
+
+
+def _script_quality_issues(script):
+    turns = script.get("turns", [])
+    total_chars = sum(len(turn.get("text", "")) for turn in turns)
+    issues = []
+    if len(turns) < PODCAST_MIN_TURN_COUNT:
+        issues.append("turn_count={}".format(len(turns)))
+    if total_chars < PODCAST_MIN_SCRIPT_CHARS:
+        issues.append("script_chars={}".format(total_chars))
+    return issues
+
+
+def build_timed_chapters(chapters, turn_timeline, duration_seconds):
+    normalized_chapters = _normalize_chapters(chapters)
+    if not normalized_chapters:
+        normalized_chapters = [{"time": "00:00", "title": "今日主线"}]
+
+    duration_seconds = max(0, int(duration_seconds or 0))
+    timeline_by_chapter = {}
+    for item in turn_timeline or []:
+        chapter = _normalize_text(item.get("chapter"))
+        if not chapter or chapter in timeline_by_chapter:
+            continue
+        timeline_by_chapter[chapter] = max(0, float(item.get("start_seconds") or 0))
+
+    result = []
+    previous_second = 0
+    chapter_count = len(normalized_chapters)
+    for index, chapter in enumerate(normalized_chapters):
+        title = chapter["title"]
+        matched_second = timeline_by_chapter.get(title)
+        if matched_second is None:
+            matched_second = _fallback_chapter_second(
+                index,
+                chapter_count,
+                previous_second,
+                duration_seconds,
+            )
+        second = min(duration_seconds, max(previous_second, int(matched_second)))
+        result.append({"time": _format_seconds(second), "title": title})
+        previous_second = second
+    return result
+
+
+def _normalize_chapters(chapters):
+    normalized = []
+    for chapter in chapters or []:
+        title = _normalize_text(chapter.get("title"))
+        if not title:
+            continue
+        normalized.append({"time": str(chapter.get("time", "")), "title": title})
+    return normalized
+
+
+def _fallback_chapter_second(index, chapter_count, previous_second, duration_seconds):
+    if index == 0 or duration_seconds <= 0:
+        return 0
+    estimated = int(duration_seconds * index / max(1, chapter_count))
+    return max(previous_second, estimated)
+
+
+def _format_seconds(seconds):
+    seconds = max(0, int(seconds))
+    return "{:02d}:{:02d}".format(seconds // 60, seconds % 60)
+
+
+def _normalize_text(value):
+    return " ".join(str(value or "").split())
+
+
+def _parse_optional_float(value):
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

@@ -15,6 +15,7 @@ from unittest.mock import patch
 sys.path.insert(0, ".")
 
 from podcast_builder import (  # noqa: E402
+    build_timed_chapters,
     _build_script_prompt,
     _call_script_ai_api,
     _normalize_script_payload,
@@ -121,6 +122,8 @@ class TestPodcastBuilder(unittest.TestCase):
             }
 
             with patch("podcast_builder.PODCAST_ENABLED", True), \
+                    patch("podcast_builder.PODCAST_MIN_TURN_COUNT", 1), \
+                    patch("podcast_builder.PODCAST_MIN_SCRIPT_CHARS", 1), \
                     patch("podcast_builder.build_podcast_script", return_value=script), \
                     patch("podcast_builder.synthesize_podcast", return_value={"duration_seconds": 123}):
                 result = run_podcast_generation(
@@ -149,6 +152,8 @@ class TestPodcastBuilder(unittest.TestCase):
             }
 
             with patch("podcast_builder.PODCAST_ENABLED", True), \
+                    patch("podcast_builder.PODCAST_MIN_TURN_COUNT", 1), \
+                    patch("podcast_builder.PODCAST_MIN_SCRIPT_CHARS", 1), \
                     patch("podcast_builder.build_podcast_script", return_value=script), \
                     patch("podcast_builder.synthesize_podcast", return_value={"duration_seconds": 123}):
                 result = run_podcast_generation(
@@ -218,9 +223,112 @@ class TestPodcastBuilder(unittest.TestCase):
         prompt = _build_script_prompt("2026-07-19", snapshots)
 
         self.assertIn("真实节目", prompt)
+        self.assertIn("4 到 8 分钟", prompt)
+        self.assertIn("35 到 50 轮", prompt)
+        self.assertIn("pause_after_seconds", prompt)
+        self.assertIn("chapter 必须等于所属章节标题", prompt)
         self.assertIn("每个 turns 元素只写一个角色的一小轮话", prompt)
         self.assertIn("不要使用模板化播报腔", prompt)
         self.assertIn("不要朗读 URL", prompt)
+
+    def test_normalize_script_payload_keeps_chapter_and_pause_metadata(self):
+        payload = {
+            "turns": [
+                {
+                    "role": "male",
+                    "chapter": "开源热榜",
+                    "pause_after_seconds": "1.1",
+                    "text": "这条可以保留。",
+                }
+            ],
+        }
+
+        script = _normalize_script_payload("2026-07-19", payload)
+
+        self.assertEqual(
+            script["turns"],
+            [
+                {
+                    "role": "male",
+                    "text": "这条可以保留。",
+                    "chapter": "开源热榜",
+                    "pause_after_seconds": 1.1,
+                }
+            ],
+        )
+
+    def test_build_timed_chapters_uses_tts_timeline(self):
+        chapters = [
+            {"time": "00:00", "title": "开场"},
+            {"time": "07:00", "title": "开源热榜"},
+        ]
+        timeline = [
+            {"chapter": "开场", "start_seconds": 0},
+            {"chapter": "开源热榜", "start_seconds": 92.4},
+        ]
+
+        timed_chapters = build_timed_chapters(chapters, timeline, 123)
+
+        self.assertEqual(
+            timed_chapters,
+            [
+                {"time": "00:00", "title": "开场"},
+                {"time": "01:32", "title": "开源热榜"},
+            ],
+        )
+
+    def test_build_timed_chapters_caps_missing_chapter_to_duration(self):
+        chapters = [
+            {"time": "00:00", "title": "开场"},
+            {"time": "07:00", "title": "行动建议"},
+        ]
+
+        timed_chapters = build_timed_chapters(chapters, [], 100)
+
+        self.assertEqual(timed_chapters[-1], {"time": "00:50", "title": "行动建议"})
+
+    def test_generation_retries_low_quality_new_script_once(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self._write_archive(temp_dir)
+            short_script = {
+                "title": "短脚本",
+                "summary": "太短。",
+                "chapters": [{"time": "00:00", "title": "今日主线"}],
+                "turns": [{"role": "male", "text": "太短。"}],
+            }
+            better_script = {
+                "title": "更完整脚本",
+                "summary": "重试后更完整。",
+                "chapters": [{"time": "00:00", "title": "今日主线"}],
+                "turns": [
+                    {"role": "male", "chapter": "今日主线", "text": "第一段足够长。"},
+                    {"role": "female", "chapter": "今日主线", "text": "第二段也足够长。"},
+                ],
+            }
+
+            with patch("podcast_builder.PODCAST_ENABLED", True), \
+                    patch("podcast_builder.PODCAST_MIN_TURN_COUNT", 2), \
+                    patch("podcast_builder.PODCAST_MIN_SCRIPT_CHARS", 10), \
+                    patch(
+                        "podcast_builder.build_podcast_script",
+                        side_effect=[short_script, better_script],
+                    ) as build_script, \
+                    patch(
+                        "podcast_builder.synthesize_podcast",
+                        return_value={
+                            "duration_seconds": 240,
+                            "turn_timeline": [{"chapter": "今日主线", "start_seconds": 0}],
+                        },
+                    ):
+                result = run_podcast_generation(
+                    scheduled_time=datetime(2026, 7, 20, 2, 30, 0),
+                    output_dir=temp_dir,
+                )
+
+            metadata = load_podcast_metadata("2026-07-19", output_dir=temp_dir)
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(metadata["title"], "更完整脚本")
+            self.assertEqual(build_script.call_count, 2)
 
     def test_call_script_ai_api_retries_transient_ssl_error(self):
         class FakeResponse:
