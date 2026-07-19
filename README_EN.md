@@ -40,6 +40,7 @@ Live demo: **https://www.gdufe888.top/ai/?lang=en**
 - **Archival** — Permanent disk archives + Redis 3-day hot cache
 - **Fault Tolerant** — Each source fails independently without blocking others
 - **Built-in Scheduler** — In-process scheduler, 3 collections per day by default
+- **Daily AI Podcast** — Optional two-host audio digest generated from selected sources in the previous day's archive
 - **Vue Frontend** — Card-based news feed with skeleton loading and responsive design
 
 ## Quick Start
@@ -93,6 +94,17 @@ All config via environment variables with sensible defaults:
 | `REDIS_URL` | redis://localhost:6379/0 | Redis connection URL |
 | `SPIDER_SCHEDULE_TIMES` | 07:50,15:50,23:50 | Daily collection times |
 | `SEND_EMAIL_ENABLED` | false | Enable email sending |
+| `PODCAST_ENABLED` | false | Enable daily AI podcast generation |
+| `PODCAST_SCHEDULE_TIME` | 02:30 | Daily podcast generation time |
+| `PODCAST_TARGET_DATE_MODE` | yesterday | Generate the previous day's podcast |
+| `PODCAST_EXCLUDED_SOURCE_IDS` | tldr-ai,infoq | Comma-separated source IDs excluded from podcast generation |
+| `PODCAST_TTS_PROVIDER` | edge_tts | TTS provider for the first version |
+| `PODCAST_VOICE_MALE` | zh-CN-YunxiNeural | Male voice |
+| `PODCAST_VOICE_FEMALE` | zh-CN-XiaoxiaoNeural | Female voice |
+| `PODCAST_MAX_DURATION_MINUTES` | 8 | Target maximum podcast duration |
+
+Daily podcast generation also requires the system command `ffmpeg` and the Python package `edge-tts`. Script generation reuses `GITHUB_TOKEN` for GitHub Models and does not require `OPENAI_API_KEY`.
+Podcast environment variables are read when the backend process starts. Restart the backend after changing `PODCAST_ENABLED` or other podcast settings.
 
 > Full configuration options in `config.py`
 
@@ -112,7 +124,7 @@ cd frontend && npm run build
 
 ## Friendly Links
 
-- [Linux.do](https://linux.do)
+<!-- Linux.do digest source is paused while the upstream digest is no longer updated. Original link: https://linux.do -->
 
 ## License
 

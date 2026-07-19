@@ -91,6 +91,15 @@
     <main class="layout">
       <aside class="source-panel">
         <button
+          class="source-tab"
+          :class="{ active: podcastMode }"
+          type="button"
+          @click="selectPodcast"
+        >
+          <span>{{ t('podcastNavLabel') }}</span>
+          <small>{{ t('podcastNavCategory') }}</small>
+        </button>
+        <button
           v-for="source in sources"
           :key="source.id"
           class="source-tab"
@@ -119,50 +128,97 @@
           </button>
         </div>
 
-        <div v-if="loading" class="skeleton-list">
-          <div v-for="n in 3" :key="n" class="skeleton-card">
-            <div class="skeleton-line title"></div>
-            <div class="skeleton-line body"></div>
-            <div class="skeleton-line body short"></div>
-          </div>
-        </div>
-        <div v-else-if="errorMessage" class="state-box error">{{ errorMessage }}</div>
-        <div v-else-if="items.length === 0" class="state-box">
-          {{ t('noContent') }}
-        </div>
-
-        <article
-          v-for="item in items"
-          v-else
-          :key="item.url + item.title"
-          class="feed-item"
-        >
-          <div class="item-main">
-            <a class="item-title" :href="item.url" target="_blank" rel="noreferrer">
-              {{ item.title }}
-            </a>
-            <p class="item-summary">{{ getDisplaySummary(item) }}</p>
-            <div class="item-tags" v-if="getItemTags(item).length">
-              <span
-                v-for="tag in getItemTags(item)"
-                :key="tag.label"
-                class="item-tag"
-                :class="'item-tag--' + tag.type"
-              >
-                <span v-if="tag.dotColor" class="lang-dot" :style="{ background: tag.dotColor }"></span>
-                {{ tag.label }}
-              </span>
+        <div v-if="podcastMode" class="podcast-view">
+          <div v-if="podcastLoading" class="skeleton-list">
+            <div v-for="n in 2" :key="n" class="skeleton-card">
+              <div class="skeleton-line title"></div>
+              <div class="skeleton-line body"></div>
+              <div class="skeleton-line body short"></div>
             </div>
           </div>
-          <a
-            class="open-link"
-            :href="getOpenUrl(item)"
-            target="_blank"
-            rel="noreferrer"
+          <div v-else-if="podcastError" class="state-box error">{{ podcastError }}</div>
+          <div v-else-if="!latestPodcast" class="state-box">
+            {{ t('podcastEmpty') }}
+          </div>
+          <div v-else>
+            <section class="podcast-episode">
+              <div class="podcast-episode-main">
+                <span class="podcast-kicker">{{ t('podcastKicker') }}</span>
+                <h3>{{ latestPodcast.title }}</h3>
+                <p class="podcast-summary">{{ t('podcastSummary') }}</p>
+                <div class="podcast-meta-row">
+                  <span>{{ latestPodcast.date }}</span>
+                  <span>{{ formatDuration(latestPodcast.duration_seconds) }}</span>
+                  <span>{{ latestPodcast.source_count }} {{ t('podcastSources') }}</span>
+                  <span>{{ latestPodcast.item_count }} {{ t('podcastItems') }}</span>
+                </div>
+                <audio
+                  class="podcast-player"
+                  controls
+                  preload="none"
+                  :src="latestPodcast.audio_url"
+                ></audio>
+              </div>
+              <aside class="podcast-chapters" v-if="latestPodcast.chapters && latestPodcast.chapters.length">
+                <h4>{{ t('podcastChapters') }}</h4>
+                <div
+                  v-for="chapter in latestPodcast.chapters"
+                  :key="chapter.time + chapter.title"
+                  class="podcast-chapter"
+                >
+                  <span>{{ chapter.time }}</span>
+                  <strong>{{ chapter.title }}</strong>
+                </div>
+              </aside>
+            </section>
+          </div>
+        </div>
+        <template v-else>
+          <div v-if="loading" class="skeleton-list">
+            <div v-for="n in 3" :key="n" class="skeleton-card">
+              <div class="skeleton-line title"></div>
+              <div class="skeleton-line body"></div>
+              <div class="skeleton-line body short"></div>
+            </div>
+          </div>
+          <div v-else-if="errorMessage" class="state-box error">{{ errorMessage }}</div>
+          <div v-else-if="items.length === 0" class="state-box">
+            {{ t('noContent') }}
+          </div>
+
+          <article
+            v-for="item in items"
+            v-else
+            :key="item.url + item.title"
+            class="feed-item"
           >
-            {{ isDiscussion(item) ? t('viewDiscussion') : t('readOriginal') }}
-          </a>
-        </article>
+            <div class="item-main">
+              <a class="item-title" :href="item.url" target="_blank" rel="noreferrer">
+                {{ item.title }}
+              </a>
+              <p class="item-summary">{{ getDisplaySummary(item) }}</p>
+              <div class="item-tags" v-if="getItemTags(item).length">
+                <span
+                  v-for="tag in getItemTags(item)"
+                  :key="tag.label"
+                  class="item-tag"
+                  :class="'item-tag--' + tag.type"
+                >
+                  <span v-if="tag.dotColor" class="lang-dot" :style="{ background: tag.dotColor }"></span>
+                  {{ tag.label }}
+                </span>
+              </div>
+            </div>
+            <a
+              class="open-link"
+              :href="getOpenUrl(item)"
+              target="_blank"
+              rel="noreferrer"
+            >
+              {{ isDiscussion(item) ? t('viewDiscussion') : t('readOriginal') }}
+            </a>
+          </article>
+        </template>
       </section>
     </main>
     <footer class="site-footer">
@@ -175,6 +231,7 @@
 
 <script>
 const API_PREFIX = '/api';
+const PODCAST_SOURCE_ID = '__podcast__';
 const THEME_STORAGE_KEY = 'theme';
 const MOBILE_LAYOUT_QUERY = '(max-width: 860px)';
 
@@ -232,6 +289,16 @@ const I18N = {
     switchToLight: '切换到浅色模式',
     comments: ' 评论',
     replies: ' 回复',
+    podcastNavLabel: '今日 AI 播客',
+    podcastNavCategory: '自动音频日报',
+    podcastTitle: '今日 AI 播客',
+    podcastEmpty: '今日播客生成中',
+    podcastLoadErr: '加载播客失败：',
+    podcastKicker: '最新一期 · 自动生成',
+    podcastSummary: '基于昨日重点资讯生成男女对话音频，快速回顾开源热点、社区讨论和官方更新。',
+    podcastSources: '个来源',
+    podcastItems: '条内容',
+    podcastChapters: '本期章节',
   },
   en: {
     siteTitle: 'Daily AI Frontier',
@@ -266,6 +333,16 @@ const I18N = {
     switchToLight: 'Switch to light mode',
     comments: ' comments',
     replies: ' replies',
+    podcastNavLabel: 'Daily AI Podcast',
+    podcastNavCategory: 'Auto audio digest',
+    podcastTitle: 'Daily AI Podcast',
+    podcastEmpty: 'Podcast is being generated',
+    podcastLoadErr: 'Failed to load podcast: ',
+    podcastKicker: 'Latest episode · Auto-generated',
+    podcastSummary: 'A two-host audio digest of yesterday’s key open-source trends, community discussions, and official AI updates.',
+    podcastSources: 'sources',
+    podcastItems: 'items',
+    podcastChapters: 'Chapters',
   }
 };
 
@@ -273,7 +350,8 @@ const SOURCE_DISPLAY_MAP = {
   'github-daily':  { label: '今日开源热榜', category: 'GitHub · 日榜' },
   'github-weekly': { label: '本周开源精选', category: 'GitHub · 周榜' },
   'hacker-news':   { label: '硅谷社区热议', category: 'Hacker News'   },
-  'linux-do':      { label: 'Linux.do 技术日报', category: '社区讨论'     },
+  // 上游日报停止更新，暂时停用；恢复来源注册时同步取消注释。
+  // 'linux-do':      { label: 'Linux.do 技术日报', category: '社区讨论'     },
   'v2ex':          { label: 'V2EX 技术日报', category: 'V2EX'          },
   'tldr-ai':       { label: 'AI 速报精选',   category: 'TLDR AI'       },
   'openai':        { label: 'OpenAI 最新动态', category: '官方更新'    },
@@ -312,7 +390,8 @@ const SOURCE_DISPLAY_MAP_EN = {
   'github-daily':  { label: 'GitHub Daily Trending', category: 'GitHub · Daily' },
   'github-weekly': { label: 'GitHub Weekly Picks',   category: 'GitHub · Weekly' },
   'hacker-news':   { label: 'Hacker News Hot',       category: 'Hacker News' },
-  'linux-do':      { label: 'Linux.do Daily',        category: 'Community' },
+  // Upstream digest is no longer updated. Keep this mapping for future recovery.
+  // 'linux-do':      { label: 'Linux.do Daily',        category: 'Community' },
   'v2ex':          { label: 'V2EX Hot Topics',       category: 'V2EX' },
   'tldr-ai':       { label: 'TLDR AI Digest',        category: 'TLDR AI' },
   'openai':        { label: 'OpenAI Updates',        category: 'Official' },
@@ -379,6 +458,9 @@ export default {
       historyDatesError: '',
       historyMode: false,
       selectedHistoryDate: '',
+      latestPodcast: null,
+      podcastLoading: false,
+      podcastError: '',
       countdownText: '',
       countdownFullText: '',
       countdownTimer: null
@@ -392,13 +474,22 @@ export default {
       const source = this.sources.find((s) => s.id === this.activeSourceId);
       return source ? source.label : this.t('defaultLabel');
     },
+    podcastMode() {
+      return this.activeSourceId === PODCAST_SOURCE_ID;
+    },
     feedTitle() {
+      if (this.podcastMode) {
+        return this.t('podcastTitle');
+      }
       if (this.historyMode && this.selectedHistoryDate) {
         return `${this.t('historyTitle')} · ${this.selectedHistoryDate}`;
       }
       return this.activeSourceLabel;
     },
     feedSubtitle() {
+      if (this.podcastMode) {
+        return '';
+      }
       if (!this.historyMode) {
         return '';
       }
@@ -530,6 +621,45 @@ export default {
       this.selectedHistoryDate = '';
       await this.selectSource(this.activeSourceId);
     },
+    async selectPodcast() {
+      this.activeSourceId = PODCAST_SOURCE_ID;
+      this.historyMode = false;
+      this.selectedHistoryDate = '';
+      this.items = [];
+      this.errorMessage = '';
+      await this.loadPodcast();
+      await this.$nextTick();
+      this.resetFeedScroll();
+    },
+    async loadPodcast() {
+      this.podcastLoading = true;
+      this.podcastError = '';
+      try {
+        const latestResponse = await fetch(`${API_PREFIX}/podcast/latest`);
+        if (!latestResponse.ok) {
+          throw new Error(`${this.t('dataApiErr')}${latestResponse.status}`);
+        }
+        const latestPayload = await latestResponse.json();
+        this.latestPodcast = latestPayload.podcast || null;
+      } catch (error) {
+        this.latestPodcast = null;
+        this.podcastError = `${this.t('podcastLoadErr')}${error.message}`;
+      } finally {
+        this.podcastLoading = false;
+      }
+    },
+    formatDuration(seconds) {
+      const totalSeconds = Number(seconds || 0);
+      if (!totalSeconds) {
+        return this.lang === 'en' ? 'Unknown duration' : '时长未知';
+      }
+      const minutes = Math.floor(totalSeconds / 60);
+      const restSeconds = totalSeconds % 60;
+      if (this.lang === 'en') {
+        return `${minutes}m ${restSeconds}s`;
+      }
+      return `${minutes}分${restSeconds}秒`;
+    },
     formatHistoryDate(dateText) {
       if (!dateText) {
         return '';
@@ -604,7 +734,9 @@ export default {
       return (map[source.id] || source).category;
     },
     isDiscussion(item) {
-      return item.source === 'Hacker News' || item.source === 'Linux.do';
+      // 上游日报停止更新，暂时停用：
+      // return item.source === 'Hacker News' || item.source === 'Linux.do';
+      return item.source === 'Hacker News';
     },
     getOpenUrl(item) {
       if (item.source === 'Hacker News') {
@@ -642,9 +774,10 @@ export default {
       } else if (src === 'Hacker News') {
         if (meta.score != null)    tags.push({ label: '▲ ' + meta.score, type: 'stat' });
         if (meta.comments != null) tags.push({ label: '💬 ' + meta.comments + this.t('comments'), type: 'fork' });
-      } else if (src === 'Linux.do') {
-        if (meta.section_title) tags.push({ label: meta.section_title, type: 'category' });
-        if (meta.reply_count != null) tags.push({ label: '💬 ' + meta.reply_count + this.t('replies'), type: 'fork' });
+      // 上游日报停止更新，暂时停用；保留标签逻辑供未来恢复。
+      // } else if (src === 'Linux.do') {
+      //   if (meta.section_title) tags.push({ label: meta.section_title, type: 'category' });
+      //   if (meta.reply_count != null) tags.push({ label: '💬 ' + meta.reply_count + this.t('replies'), type: 'fork' });
       } else if (src === 'TLDR AI') {
         const cat = this.lang === 'en' ? item.category : TLDR_CATEGORY_MAP[item.category];
         if (cat) tags.push({ label: cat, type: 'category' });
@@ -1429,6 +1562,108 @@ a {
   opacity: 0.75;
 }
 
+/* ── Podcast ─────────────────────────────── */
+
+.podcast-episode {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 24px;
+  padding: 24px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(90deg, rgba(0, 87, 255, 0.08), rgba(16, 185, 129, 0.08));
+}
+
+.podcast-episode-main {
+  min-width: 0;
+}
+
+.podcast-kicker {
+  display: inline-flex;
+  margin-bottom: 10px;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.podcast-episode h3 {
+  margin: 0;
+  color: var(--text-1);
+  font-size: 24px;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+
+.podcast-summary {
+  margin: 10px 0 0;
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.podcast-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.podcast-meta-row span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.podcast-player {
+  width: min(560px, 100%);
+  margin-top: 16px;
+}
+
+.podcast-chapters {
+  align-self: start;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.podcast-chapters h4 {
+  margin: 0 0 12px;
+  color: var(--text-1);
+  font-size: 14px;
+}
+
+.podcast-chapter {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 8px;
+  padding: 9px 0;
+  border-top: 1px solid var(--border);
+}
+
+.podcast-chapter:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.podcast-chapter span {
+  color: var(--primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.podcast-chapter strong {
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 /* ── Skeleton ─────────────────────────────── */
 
 @keyframes shimmer {
@@ -1568,6 +1803,14 @@ a {
 
   .feed-item {
     display: block;
+  }
+
+  .podcast-episode {
+    grid-template-columns: 1fr;
+  }
+
+  .podcast-episode {
+    padding: 16px;
   }
 
   .back-today-button {

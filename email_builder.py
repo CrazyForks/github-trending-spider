@@ -8,7 +8,13 @@ HTML 邮件生成模块
 from datetime import datetime
 
 from config import AI_MODEL
-from content_items import SOURCE_ANTHROPIC, SOURCE_INFOQ_AI, SOURCE_LINUX_DO, SOURCE_OPENAI
+from content_items import (
+    SOURCE_ANTHROPIC,
+    SOURCE_INFOQ_AI,
+    # 上游日报停止更新，暂时停用；恢复邮件板块时取消导入。
+    # SOURCE_LINUX_DO,
+    SOURCE_OPENAI,
+)
 
 
 def _escape_html(text):
@@ -290,10 +296,11 @@ def build_email_html(daily_repos, weekly_repos, hn_stories, v2ex_topics=None, tl
         item for item in content_items
         if item.get("source") == SOURCE_INFOQ_AI
     ]
-    linux_do_items = [
-        item for item in content_items
-        if item.get("source") == SOURCE_LINUX_DO
-    ]
+    # 上游日报停止更新，暂时停用；保留原筛选逻辑供未来恢复。
+    # linux_do_items = [
+    #     item for item in content_items
+    #     if item.get("source") == SOURCE_LINUX_DO
+    # ]
 
     today = datetime.now().strftime("%Y-%m-%d")
     html_parts = [
@@ -348,13 +355,13 @@ def build_email_html(daily_repos, weekly_repos, hn_stories, v2ex_topics=None, tl
         html_parts.append(_build_hn_table(hn_stories))
         html_parts.append("</div>")
 
-    # Linux.do 板块
-    if linux_do_items:
-        html_parts.append('<div class="section-divider"></div>')
-        html_parts.append('<div class="linux-do-section">')
-        html_parts.append("<h2>Linux.do 技术日报 Top {}</h2>".format(len(linux_do_items)))
-        html_parts.append(_build_linux_do_table(linux_do_items))
-        html_parts.append("</div>")
+    # Linux.do 板块：上游日报停止更新，暂时停用；保留供未来恢复。
+    # if linux_do_items:
+    #     html_parts.append('<div class="section-divider"></div>')
+    #     html_parts.append('<div class="linux-do-section">')
+    #     html_parts.append("<h2>Linux.do 技术日报 Top {}</h2>".format(len(linux_do_items)))
+    #     html_parts.append(_build_linux_do_table(linux_do_items))
+    #     html_parts.append("</div>")
 
     # V2EX 板块
     if v2ex_topics:
@@ -411,7 +418,8 @@ def build_email_html(daily_repos, weekly_repos, hn_stories, v2ex_topics=None, tl
         "<p>此邮件由 AI 后端专项信息源 Spider 自动生成并发送。</p>",
         "<p>数据来源：<a href='https://github.com/trending'>GitHub Trending</a> "
         "| <a href='https://news.ycombinator.com/'>Hacker News</a> "
-        "| <a href='https://news.linuxe.top/'>Linux.do 技术日报</a> "
+        # 上游日报停止更新，暂时停用；恢复时取消页脚链接注释。
+        # "| <a href='https://news.linuxe.top/'>Linux.do 技术日报</a> "
         "| <a href='https://www.v2ex.com/'>V2EX</a> "
         "| <a href='https://ai.tldr.tech/'>TLDR AI</a> "
         "| <a href='https://openai.com/news/'>OpenAI</a> "

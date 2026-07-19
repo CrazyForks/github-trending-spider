@@ -133,7 +133,7 @@ V2EX_MAX_RETRIES = int(os.environ.get("V2EX_MAX_RETRIES", "5"))
 # V2EX 请求间隔（秒），避免触发限流
 V2EX_REQUEST_INTERVAL = float(os.environ.get("V2EX_REQUEST_INTERVAL", "0.5"))
 
-# =========================================================================
+# ==============================================================ƒ===========
 # Linux.do 技术日报配置
 # =========================================================================
 
@@ -207,6 +207,39 @@ OUTPUT_JSON_PATH = os.environ.get("OUTPUT_JSON_PATH", "output/latest.json")
 # 按来源归档输出目录。归档结构：
 # output/<source>/<YYYY-MM-DD>/<batch>.json
 OUTPUT_ARCHIVE_DIR = os.environ.get("OUTPUT_ARCHIVE_DIR", "output")
+
+# =========================================================================
+# 每日 AI 播客配置
+# =========================================================================
+
+# 是否启用每日播客生成。默认关闭，避免未安装 edge-tts / ffmpeg 的环境启动后报错。
+PODCAST_ENABLED = _get_bool_env("PODCAST_ENABLED", False)
+
+# 每天生成播客的时间，24 小时制。播客任务只生成一次前一天内容。
+PODCAST_SCHEDULE_TIME = os.environ.get("PODCAST_SCHEDULE_TIME", "02:30")
+
+# 目标内容日期。当前仅支持 yesterday：凌晨生成前一天的完整音频日报。
+PODCAST_TARGET_DATE_MODE = os.environ.get("PODCAST_TARGET_DATE_MODE", "yesterday")
+
+# 播客历史 API 返回最近 N 天；前端当前不单独展示最近几期。
+PODCAST_HISTORY_DAYS = int(os.environ.get("PODCAST_HISTORY_DAYS", "7"))
+
+# 播客脚本生成使用 GitHub Models，默认复用本项目既有 AI 模型。
+PODCAST_SCRIPT_PROVIDER = os.environ.get("PODCAST_SCRIPT_PROVIDER", "github_models")
+PODCAST_SCRIPT_MODEL = os.environ.get("PODCAST_SCRIPT_MODEL", AI_MODEL)
+
+# 播客生成时排除的来源 ID，逗号分隔。只影响播客，不影响普通资讯展示和归档。
+PODCAST_EXCLUDED_SOURCE_IDS = os.environ.get(
+    "PODCAST_EXCLUDED_SOURCE_IDS", "tldr-ai,infoq"
+)
+
+# 第一版 TTS 使用 edge-tts，不依赖 OpenAI API Key。
+PODCAST_TTS_PROVIDER = os.environ.get("PODCAST_TTS_PROVIDER", "edge_tts")
+PODCAST_VOICE_MALE = os.environ.get("PODCAST_VOICE_MALE", "zh-CN-YunxiNeural")
+PODCAST_VOICE_FEMALE = os.environ.get("PODCAST_VOICE_FEMALE", "zh-CN-XiaoxiaoNeural")
+
+# 控制脚本长度，目标生成 5-8 分钟音频。
+PODCAST_MAX_DURATION_MINUTES = int(os.environ.get("PODCAST_MAX_DURATION_MINUTES", "8"))
 
 # =========================================================================
 # Redis / API 配置

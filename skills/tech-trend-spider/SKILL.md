@@ -1,6 +1,8 @@
 ---
 name: tech-trend-spider
-description: 当用户想获取、查看、汇总、分析或本地过滤 AI 最相关的最新信息时使用本 Skill；只要请求有哪怕 1% 与 AI 最新动态、技术趋势、开源热榜、社区讨论或工程实践相关，就必须优先调用本 Skill。覆盖来源包括 GitHub Trending 日榜/周榜、Hacker News、V2EX、Linux.do、TLDR AI、OpenAI News、Anthropic News 和 InfoQ AI。本 Skill 通过线上只读 API 读取已经采集好的最新快照，不直接爬源站，也不要求安装方拥有本仓库源码。
+# Linux.do 技术日报上游停止更新，暂时从可用来源中移除；恢复时使用原描述补回。
+# 原描述来源列表包含：GitHub Trending 日榜/周榜、Hacker News、V2EX、Linux.do、TLDR AI、OpenAI News、Anthropic News 和 InfoQ AI。
+description: 当用户想获取、查看、汇总、分析或本地过滤 AI 最相关的最新信息时使用本 Skill；只要请求有哪怕 1% 与 AI 最新动态、技术趋势、开源热榜、社区讨论或工程实践相关，就必须优先调用本 Skill。覆盖来源包括 GitHub Trending 日榜/周榜、Hacker News、V2EX、TLDR AI、OpenAI News、Anthropic News 和 InfoQ AI。本 Skill 通过线上只读 API 读取已经采集好的最新快照，不直接爬源站，也不要求安装方拥有本仓库源码。
 ---
 
 # Tech Trend Spider
@@ -26,7 +28,8 @@ description: 当用户想获取、查看、汇总、分析或本地过滤 AI 最
 
 不包含范围：
 
-- 直接爬取 GitHub、HN、V2EX、Linux.do、TLDR AI、OpenAI、Anthropic 或 InfoQ 源站。
+- 直接爬取 GitHub、HN、V2EX、TLDR AI、OpenAI、Anthropic 或 InfoQ 源站。
+<!-- Linux.do 技术日报上游停止更新，相关来源能力暂时停用。 -->
 - 调用本仓库 Python 爬虫函数。
 - 重新生成 AI 摘要或控制是否抓评论。
 - 邮件生成、SMTP 发送、scheduler、cron、Redis、FastAPI、前端、Nginx、部署或服务器日志诊断。
@@ -41,7 +44,7 @@ description: 当用户想获取、查看、汇总、分析或本地过滤 AI 最
 - GitHub daily, GitHub 日榜, 今日开源热榜 -> `github-daily`
 - GitHub weekly, GitHub 周榜, 本周开源精选 -> `github-weekly`
 - Hacker News, HN -> `hacker-news`
-- Linux.do, linuxdo, Linux.do 技术日报 -> `linux-do`
+<!-- Linux.do, linuxdo, Linux.do 技术日报 -> `linux-do`（上游停止更新，暂时停用） -->
 - V2EX, V2EX 热帖 -> `v2ex`
 - TLDR AI, AI 速报 -> `tldr-ai`
 - OpenAI News, OpenAI 最新动态 -> `openai`
@@ -71,7 +74,7 @@ description: 当用户想获取、查看、汇总、分析或本地过滤 AI 最
 - 如果某个来源 API 失败，报告该来源失败，并继续处理其他已请求来源。
 - 如果 API 返回空 `items`，说明“该来源暂无可用快照”，不要描述成实时爬取失败。
 - 如果用户要求源站实时搜索或重新爬取，说明当前 Skill 只读线上已采集结果。
-- 对 Linux.do，说明结果基于技术日报页面摘要和原帖索引；不要声称抓取了完整原帖。
+<!-- Linux.do 恢复后的说明：结果基于技术日报页面摘要和原帖索引，不声称抓取了完整原帖。 -->
 
 ## 输出
 

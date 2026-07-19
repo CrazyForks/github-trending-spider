@@ -1,0 +1,264 @@
+# -*- coding: utf-8 -*-
+"""
+每日 AI 播客脚本生成和生成任务编排。
+"""
+
+import json
+import logging
+import re
+from datetime import datetime, timedelta
+
+import requests
+
+from config import (
+    AI_API_URL,
+    GITHUB_TOKEN,
+    OUTPUT_ARCHIVE_DIR,
+    PODCAST_ENABLED,
+    PODCAST_EXCLUDED_SOURCE_IDS,
+    PODCAST_MAX_DURATION_MINUTES,
+    PODCAST_SCRIPT_MODEL,
+    PODCAST_SCRIPT_PROVIDER,
+    PODCAST_TARGET_DATE_MODE,
+)
+from content_store import load_history_archive_snapshot
+from podcast_store import (
+    acquire_podcast_lock,
+    build_failed_metadata,
+    has_successful_podcast,
+    podcast_dir,
+    release_podcast_lock,
+    write_podcast_metadata,
+    write_podcast_script,
+)
+from podcast_tts import synthesize_podcast
+from source_registry import SOURCE_DEFINITIONS
+
+logger = logging.getLogger(__name__)
+
+MAX_ITEMS_PER_SOURCE = 8
+
+
+def resolve_target_content_date(run_at=None, mode=PODCAST_TARGET_DATE_MODE):
+    """根据调度时间计算播客内容日期。"""
+    if run_at is None:
+        run_at = datetime.now()
+    if mode != "yesterday":
+        raise ValueError("暂不支持的播客目标日期模式: {}".format(mode))
+    return (run_at.date() - timedelta(days=1)).isoformat()
+
+
+def run_podcast_generation(scheduled_time=None, output_dir=OUTPUT_ARCHIVE_DIR):
+    """执行一次每日播客生成任务。"""
+    if not PODCAST_ENABLED:
+        logger.info("[播客] PODCAST_ENABLED=false，跳过播客生成")
+        return {"status": "disabled"}
+
+    run_at = scheduled_time if hasattr(scheduled_time, "date") else datetime.now()
+    date_text = resolve_target_content_date(run_at)
+
+    if has_successful_podcast(date_text, output_dir):
+        logger.info("[播客] %s 已成功生成，跳过", date_text)
+        return {"status": "skipped", "reason": "already-success", "date": date_text}
+
+    if not acquire_podcast_lock(date_text, output_dir):
+        logger.warning("[播客] %s 已有生成任务运行中，跳过", date_text)
+        return {"status": "skipped", "reason": "locked", "date": date_text}
+
+    source_count = 0
+    item_count = 0
+    try:
+        snapshots = load_podcast_source_snapshots(date_text, output_dir)
+        source_count = len(snapshots)
+        item_count = sum(len(snapshot.get("items", [])) for snapshot in snapshots)
+        if item_count == 0:
+            raise RuntimeError("{} 没有可用于生成播客的归档内容".format(date_text))
+
+        script = build_podcast_script(date_text, snapshots)
+        write_podcast_script(date_text, script, output_dir)
+
+        tts_result = synthesize_podcast(script.get("turns", []), podcast_dir(date_text, output_dir))
+        metadata = {
+            "date": date_text,
+            "title": script.get("title") or "{} AI 音频日报".format(date_text),
+            "audio_url": "/api/podcasts/{}/podcast.mp3".format(date_text),
+            "duration_seconds": tts_result.get("duration_seconds", 0),
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "source_count": source_count,
+            "item_count": item_count,
+            "status": "success",
+            "error": "",
+            "chapters": script.get("chapters", []),
+        }
+        write_podcast_metadata(metadata, output_dir)
+        logger.info("[播客] %s 生成完成", date_text)
+        return {"status": "success", "date": date_text, "metadata": metadata}
+    except Exception as e:
+        logger.exception("[播客] %s 生成失败: %s", date_text, e)
+        metadata = build_failed_metadata(
+            date_text,
+            e,
+            source_count=source_count,
+            item_count=item_count,
+        )
+        write_podcast_metadata(metadata, output_dir)
+        return {"status": "failed", "date": date_text, "error": str(e)}
+    finally:
+        release_podcast_lock(date_text, output_dir)
+
+
+def load_podcast_source_snapshots(date_text, output_dir=OUTPUT_ARCHIVE_DIR):
+    """读取目标日期各来源最新归档。"""
+    snapshots = []
+    excluded_source_ids = _parse_source_id_list(PODCAST_EXCLUDED_SOURCE_IDS)
+    for source in SOURCE_DEFINITIONS:
+        source_id = source["id"]
+        if source_id in excluded_source_ids:
+            logger.info("[播客] 来源=%s | 日期=%s | 已配置排除", source_id, date_text)
+            continue
+        snapshot, served_from, batch_file = load_history_archive_snapshot(
+            source_id,
+            date_text,
+            output_dir=output_dir,
+        )
+        if not snapshot:
+            logger.info(
+                "[播客] 来源=%s | 日期=%s | 读取自=%s | 无归档",
+                source_id,
+                date_text,
+                served_from,
+            )
+            continue
+        podcast_snapshot = dict(snapshot)
+        podcast_snapshot["source"] = snapshot.get("source", source)
+        podcast_snapshot["batch_file"] = batch_file
+        podcast_snapshot["items"] = snapshot.get("items", [])[:MAX_ITEMS_PER_SOURCE]
+        snapshots.append(podcast_snapshot)
+    return snapshots
+
+
+def _parse_source_id_list(value):
+    if not value:
+        return set()
+    if isinstance(value, (list, tuple, set)):
+        return {str(item).strip() for item in value if str(item).strip()}
+    return {item.strip() for item in str(value).split(",") if item.strip()}
+
+
+def build_podcast_script(date_text, snapshots):
+    """调用 GitHub Models，把归档资讯生成男女对话脚本。"""
+    if PODCAST_SCRIPT_PROVIDER != "github_models":
+        raise ValueError("暂不支持的播客脚本 provider: {}".format(PODCAST_SCRIPT_PROVIDER))
+    if not GITHUB_TOKEN:
+        raise RuntimeError("未配置 GITHUB_TOKEN，无法生成播客脚本")
+
+    prompt = _build_script_prompt(date_text, snapshots)
+    payload = _call_script_ai_api(prompt)
+    return _normalize_script_payload(date_text, payload)
+
+
+def _build_script_prompt(date_text, snapshots):
+    lines = []
+    for snapshot in snapshots:
+        source = snapshot.get("source", {})
+        source_label = source.get("label") or source.get("name") or source.get("id", "")
+        lines.append("来源: {}".format(source_label))
+        for index, item in enumerate(snapshot.get("items", []), 1):
+            lines.append(
+                "{}. 标题: {}\n   链接: {}\n   摘要: {}\n   后端关注点: {}".format(
+                    index,
+                    item.get("title", ""),
+                    item.get("url", ""),
+                    item.get("chinese_summary") or item.get("original_summary", ""),
+                    item.get("backend_focus", ""),
+                )
+            )
+        lines.append("")
+
+    return (
+        "请把以下 {} 的 AI 技术资讯整理成一段中文男女对话播客脚本。\n"
+        "目标音频时长不超过 {} 分钟。\n"
+        "要求：\n"
+        "1. 固定 5 段：片头、开源热榜、社区讨论、官方更新、今日行动建议。\n"
+        "2. 输出男女对话，不要机械朗读新闻，要解释为什么后端工程师应该在意。\n"
+        "3. 每句不要太长，适合 TTS 朗读。\n"
+        "4. 严格返回 JSON，不要包含 Markdown。\n"
+        "JSON 格式：\n"
+        "{{\"title\":\"标题\",\"chapters\":[{{\"time\":\"00:00\",\"title\":\"今日主线\"}}],"
+        "\"turns\":[{{\"role\":\"male\",\"text\":\"男声台词\"}},"
+        "{{\"role\":\"female\",\"text\":\"女声台词\"}}]}}\n\n"
+        "内容列表：\n{}"
+    ).format(date_text, PODCAST_MAX_DURATION_MINUTES, "\n".join(lines))
+
+
+def _call_script_ai_api(prompt):
+    headers = {
+        "Authorization": "Bearer {}".format(GITHUB_TOKEN),
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": PODCAST_SCRIPT_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": "你是一个懂 AI 基础设施和后端工程的中文播客编辑。请始终返回有效 JSON。",
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.4,
+        "max_tokens": 6000,
+    }
+    response = requests.post(
+        "{}/chat/completions".format(AI_API_URL),
+        headers=headers,
+        json=payload,
+        timeout=90,
+    )
+    response.raise_for_status()
+    content = response.json()["choices"][0]["message"]["content"]
+    return _parse_json_response(content)
+
+
+def _parse_json_response(content):
+    text = (content or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    return json.loads(text)
+
+
+def _normalize_script_payload(date_text, payload):
+    if not isinstance(payload, dict):
+        raise ValueError("播客脚本响应不是 JSON 对象")
+
+    turns = []
+    for turn in payload.get("turns", []):
+        role = turn.get("role")
+        text = (turn.get("text") or "").strip()
+        if role not in ("male", "female") or not text:
+            continue
+        turns.append({"role": role, "text": text})
+
+    if not turns:
+        raise ValueError("播客脚本没有有效台词")
+
+    chapters = payload.get("chapters") or [
+        {"time": "00:00", "title": "今日主线"},
+        {"time": "01:10", "title": "开源热榜"},
+        {"time": "03:20", "title": "社区讨论"},
+        {"time": "05:10", "title": "官方更新"},
+    ]
+
+    return {
+        "date": date_text,
+        "title": payload.get("title") or "{} AI 音频日报".format(date_text),
+        "chapters": [
+            {
+                "time": str(chapter.get("time", "")),
+                "title": str(chapter.get("title", "")),
+            }
+            for chapter in chapters
+            if chapter.get("title")
+        ],
+        "turns": turns,
+    }

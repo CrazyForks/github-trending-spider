@@ -40,6 +40,7 @@
 - **按来源归档** — 磁盘永久保留 + Redis 3 天热数据缓存
 - **独立容错** — 任一源失败不影响其他源输出
 - **内置定时采集** — FastAPI 进程内调度器，默认每天 3 次
+- **每日 AI 播客** — 可选开启，凌晨自动生成前一天重点资讯的男女对话音频摘要
 - **Vue 前端** — 卡片式资讯流，骨架屏加载，响应式设计
 
 ## 快速开始
@@ -95,13 +96,14 @@ GET https://www.gdufe888.top/api/sources/{source_id}/latest
 github-daily
 github-weekly
 hacker-news
-linux-do
 v2ex
 tldr-ai
 openai
 anthropic
 infoq
 ```
+
+<!-- Linux.do 技术日报上游停止更新，source_id `linux-do` 暂停开放，恢复时放回上方列表。 -->
 
 ### RSS
 
@@ -150,7 +152,8 @@ https://www.gdufe888.top/api
 适用场景：
 
 - 查询 GitHub Trending 日榜或周榜。
-- 查询 Hacker News、V2EX、Linux.do 等社区讨论。
+- 查询 Hacker News、V2EX 等社区讨论。
+<!-- Linux.do 技术日报上游停止更新，相关查询入口暂时停用。 -->
 - 查询 TLDR AI、OpenAI、Anthropic、InfoQ AI 等 AI 资讯。
 - 按关键词在 API 返回结果中做本地过滤。
 - 按条数对 API 返回结果做本地截断。
@@ -189,6 +192,17 @@ GET https://www.gdufe888.top/api/sources/{source_id}/latest
 | `SEND_EMAIL_ENABLED` | false | 是否发送邮件 |
 | `EMAIL_SEND_TIMES` | 07:50 | 未配置 `MAIL_TO_BY_TIME` 时，开启邮件后允许发送邮件的调度时间 |
 | `MAIL_TO_BY_TIME` | - | 按调度时间指定不同收件人，JSON 对象格式 |
+| `PODCAST_ENABLED` | false | 是否启用每日 AI 播客生成 |
+| `PODCAST_SCHEDULE_TIME` | 02:30 | 每天生成播客的时间 |
+| `PODCAST_TARGET_DATE_MODE` | yesterday | 生成前一天内容的播客 |
+| `PODCAST_EXCLUDED_SOURCE_IDS` | tldr-ai,infoq | 播客生成时排除的来源 ID，逗号分隔 |
+| `PODCAST_TTS_PROVIDER` | edge_tts | 第一版使用 edge-tts 合成语音 |
+| `PODCAST_VOICE_MALE` | zh-CN-YunxiNeural | 男声 voice |
+| `PODCAST_VOICE_FEMALE` | zh-CN-XiaoxiaoNeural | 女声 voice |
+| `PODCAST_MAX_DURATION_MINUTES` | 8 | 播客目标最长分钟数 |
+
+每日播客还需要安装系统命令 `ffmpeg`，并在 Python 依赖中安装 `edge-tts`。脚本生成复用 `GITHUB_TOKEN` 调用 GitHub Models，不需要 `OPENAI_API_KEY`。
+播客相关环境变量在后端进程启动时读取；修改 `PODCAST_ENABLED` 或其他播客配置后，需要重启后端服务才会生效。
 
 > 完整配置项见源码 `config.py`
 
@@ -208,7 +222,7 @@ cd frontend && npm run build
 
 ## 友情链接
 
-- [Linux.do](https://linux.do)
+<!-- Linux.do 日报来源暂停期间暂不展示相关入口；原链接：https://linux.do -->
 
 ## License
 

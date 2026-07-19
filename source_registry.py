@@ -30,13 +30,14 @@ SOURCE_DEFINITIONS = [
         "content_source": "GitHub Trending Weekly",
         "category": "开源趋势",
     },
-    {
-        "id": SOURCE_LINUX_DO_ID,
-        "name": "Linux.do",
-        "label": "Linux.do 技术日报",
-        "content_source": "Linux.do",
-        "category": "社区讨论",
-    },
+    # 上游日报停止更新，暂时停用；保留来源定义供未来恢复。
+    # {
+    #     "id": SOURCE_LINUX_DO_ID,
+    #     "name": "Linux.do",
+    #     "label": "Linux.do 技术日报",
+    #     "content_source": "Linux.do",
+    #     "category": "社区讨论",
+    # },
     {
         "id": SOURCE_V2EX_ID,
         "name": "V2EX",

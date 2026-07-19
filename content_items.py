@@ -129,7 +129,8 @@ def build_all_content_items(daily_repos, weekly_repos, hn_stories, v2ex_topics, 
     items.extend(_github_to_items(daily_repos, SOURCE_GITHUB_DAILY, "每日热点"))
     items.extend(_github_to_items(weekly_repos, SOURCE_GITHUB_WEEKLY, "每周热点"))
     items.extend(_hn_to_items(hn_stories))
-    items.extend(_linux_do_to_items(linux_do_items))
+    # 上游日报停止更新，暂时停用；保留适配器和参数供未来恢复。
+    # items.extend(_linux_do_to_items(linux_do_items))
     items.extend(_v2ex_to_items(v2ex_topics))
     items.extend(_tldr_to_items(tldr_items))
     items.extend(ai_source_items or [])

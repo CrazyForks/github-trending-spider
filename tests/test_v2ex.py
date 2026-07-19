@@ -569,12 +569,13 @@ class TestSourceRegistry(unittest.TestCase):
         self.assertEqual(source["id"], "v2ex")
         self.assertEqual(source["category"], "社区讨论")
 
-    def test_v2ex_position(self):
-        """V2EX 在第4位（HN之后）"""
+    def test_v2ex_position_after_linux_do_disabled(self):
+        """Linux.do 停用后保持当前 V2EX → HN 的相对顺序"""
         from source_registry import SOURCE_DEFINITIONS
         ids = [s["id"] for s in SOURCE_DEFINITIONS]
-        self.assertEqual(ids.index("v2ex"), 3)
-        self.assertEqual(ids.index("hacker-news"), 2)  # V2EX 紧随 HN
+        self.assertNotIn("linux-do", ids)
+        self.assertEqual(ids.index("v2ex"), 2)
+        self.assertEqual(ids.index("hacker-news"), 3)
 
 
 if __name__ == "__main__":

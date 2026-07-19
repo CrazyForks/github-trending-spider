@@ -9,6 +9,7 @@ import logging
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from access_log import AccessLogMiddleware, start_stats_reporter
 from config import API_CORS_ORIGINS, API_MAX_ITEMS_PER_SOURCE
@@ -22,6 +23,12 @@ from rss_builder import build_rss_feed
 from scheduler import start_scheduler, stop_scheduler
 from source_registry import SOURCE_DEFINITIONS, get_source_by_id
 from logging_config import setup_logging
+from podcast_store import (
+    get_podcast_audio_file,
+    is_valid_podcast_date,
+    list_podcast_history,
+    load_latest_podcast_metadata,
+)
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -157,6 +164,55 @@ def get_history_source(source_id, date_text):
         "total_item_count": snapshot.get("item_count", len(items)),
         "items": items,
     }
+
+
+@app.get("/api/podcast/latest")
+def get_latest_podcast():
+    """返回最新成功生成的每日 AI 播客元数据。"""
+    metadata = load_latest_podcast_metadata()
+    if not metadata:
+        logger.info("[播客] 请求最新播客 | 状态=empty")
+        return {
+            "status": "empty",
+            "podcast": None,
+        }
+
+    logger.info("[播客] 请求最新播客 | 日期=%s", metadata.get("date", ""))
+    return {
+        "status": metadata.get("status", "success"),
+        "podcast": metadata,
+    }
+
+
+@app.get("/api/podcast/history")
+def get_podcast_history():
+    """返回最近 N 天成功生成的每日 AI 播客列表。"""
+    podcasts = list_podcast_history()
+    logger.info("[播客] 请求播客历史 | 条数=%d", len(podcasts))
+    return {
+        "podcasts": podcasts,
+        "count": len(podcasts),
+    }
+
+
+@app.get("/api/podcasts/{date_text}/podcast.mp3")
+def get_podcast_audio(date_text):
+    """返回指定内容日期的播客 MP3。"""
+    if not is_valid_podcast_date(date_text):
+        logger.warning("[播客] 请求了非法播客日期 | date=%s", date_text)
+        raise HTTPException(status_code=400, detail="Invalid date")
+
+    audio_file = get_podcast_audio_file(date_text)
+    if not audio_file:
+        logger.warning("[播客] 请求了不存在的播客音频 | date=%s", date_text)
+        raise HTTPException(status_code=404, detail="Podcast audio not found")
+
+    logger.info("[播客] 返回播客音频 | date=%s | path=%s", date_text, audio_file)
+    return FileResponse(
+        audio_file,
+        media_type="audio/mpeg",
+        filename="{}-podcast.mp3".format(date_text),
+    )
 
 
 @app.get("/api/sources/{source_id}/latest")

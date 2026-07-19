@@ -11,6 +11,8 @@ import time
 from datetime import datetime, timedelta
 
 from config import (
+    PODCAST_ENABLED,
+    PODCAST_SCHEDULE_TIME,
     SPIDER_RUN_ON_STARTUP,
     SPIDER_SCHEDULE_TIMES,
     SPIDER_SCHEDULER_ENABLED,
@@ -19,8 +21,10 @@ from config import (
 logger = logging.getLogger(__name__)
 
 _scheduler_thread = None
+_podcast_scheduler_thread = None
 _stop_event = threading.Event()
 _run_lock = threading.Lock()
+_podcast_run_lock = threading.Lock()
 
 
 def parse_schedule_times(value):
@@ -44,32 +48,51 @@ def parse_schedule_times(value):
 
 def start_scheduler():
     """启动后台调度线程。"""
-    global _scheduler_thread
+    global _scheduler_thread, _podcast_scheduler_thread
 
-    if not SPIDER_SCHEDULER_ENABLED:
-        logger.info("内置采集调度已关闭")
+    if not SPIDER_SCHEDULER_ENABLED and not PODCAST_ENABLED:
+        logger.info("内置调度已关闭")
         return
 
-    if _scheduler_thread and _scheduler_thread.is_alive():
-        logger.info("内置采集调度已在运行")
-        return
-
-    try:
-        schedule_times = parse_schedule_times(SPIDER_SCHEDULE_TIMES)
-    except ValueError as e:
-        logger.error("内置采集调度配置无效: %s", e)
-        return
     _stop_event.clear()
-    _scheduler_thread = threading.Thread(
-        target=_scheduler_loop,
-        args=(schedule_times,),
-        name="spider-scheduler",
-        daemon=True,
-    )
-    _scheduler_thread.start()
-    logger.info("内置采集调度已启动: %s", SPIDER_SCHEDULE_TIMES)
 
-    if SPIDER_RUN_ON_STARTUP:
+    if SPIDER_SCHEDULER_ENABLED:
+        if _scheduler_thread and _scheduler_thread.is_alive():
+            logger.info("内置采集调度已在运行")
+        else:
+            try:
+                schedule_times = parse_schedule_times(SPIDER_SCHEDULE_TIMES)
+            except ValueError as e:
+                logger.error("内置采集调度配置无效: %s", e)
+            else:
+                _scheduler_thread = threading.Thread(
+                    target=_scheduler_loop,
+                    args=(schedule_times,),
+                    name="spider-scheduler",
+                    daemon=True,
+                )
+                _scheduler_thread.start()
+                logger.info("内置采集调度已启动: %s", SPIDER_SCHEDULE_TIMES)
+
+    if PODCAST_ENABLED:
+        if _podcast_scheduler_thread and _podcast_scheduler_thread.is_alive():
+            logger.info("每日播客调度已在运行")
+        else:
+            try:
+                podcast_schedule_times = parse_schedule_times(PODCAST_SCHEDULE_TIME)
+            except ValueError as e:
+                logger.error("每日播客调度配置无效: %s", e)
+            else:
+                _podcast_scheduler_thread = threading.Thread(
+                    target=_podcast_scheduler_loop,
+                    args=(podcast_schedule_times,),
+                    name="podcast-scheduler",
+                    daemon=True,
+                )
+                _podcast_scheduler_thread.start()
+                logger.info("每日播客调度已启动: %s", PODCAST_SCHEDULE_TIME)
+
+    if SPIDER_SCHEDULER_ENABLED and SPIDER_RUN_ON_STARTUP:
         trigger_spider_async("startup")
 
 
@@ -78,7 +101,9 @@ def stop_scheduler():
     _stop_event.set()
     if _scheduler_thread and _scheduler_thread.is_alive():
         _scheduler_thread.join(timeout=5)
-    logger.info("内置采集调度已停止")
+    if _podcast_scheduler_thread and _podcast_scheduler_thread.is_alive():
+        _podcast_scheduler_thread.join(timeout=5)
+    logger.info("内置调度已停止")
 
 
 def trigger_spider_async(reason):
@@ -93,6 +118,18 @@ def trigger_spider_async(reason):
     return thread
 
 
+def trigger_podcast_async(reason):
+    """异步触发一次播客生成。"""
+    thread = threading.Thread(
+        target=_run_podcast_with_lock,
+        args=(reason,),
+        name="podcast-runner",
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
 def _scheduler_loop(schedule_times):
     while not _stop_event.is_set():
         next_run_at = _next_run_time(datetime.now(), schedule_times)
@@ -101,6 +138,16 @@ def _scheduler_loop(schedule_times):
         if _stop_event.wait(wait_seconds):
             break
         _run_spider_with_lock("schedule", next_run_at)
+
+
+def _podcast_scheduler_loop(schedule_times):
+    while not _stop_event.is_set():
+        next_run_at = _next_run_time(datetime.now(), schedule_times)
+        wait_seconds = max(1, int((next_run_at - datetime.now()).total_seconds()))
+        logger.info("下一次每日播客生成时间: %s", next_run_at.isoformat(timespec="seconds"))
+        if _stop_event.wait(wait_seconds):
+            break
+        _run_podcast_with_lock("schedule", next_run_at)
 
 
 def _run_spider_with_lock(reason, scheduled_time=None):
@@ -118,6 +165,24 @@ def _run_spider_with_lock(reason, scheduled_time=None):
         return False
     finally:
         _run_lock.release()
+
+
+def _run_podcast_with_lock(reason, scheduled_time=None):
+    if not _podcast_run_lock.acquire(blocking=False):
+        logger.warning("已有播客生成任务运行中，跳过本次触发: %s", reason)
+        return False
+
+    try:
+        logger.info("开始执行每日播客生成任务: %s", reason)
+        from podcast_builder import run_podcast_generation
+
+        result = run_podcast_generation(scheduled_time=scheduled_time)
+        return result.get("status") in ("success", "skipped", "disabled")
+    except Exception as e:
+        logger.exception("每日播客生成任务异常: %s", e)
+        return False
+    finally:
+        _podcast_run_lock.release()
 
 
 def _next_run_time(now, schedule_times):
