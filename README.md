@@ -207,7 +207,7 @@ GET https://www.gdufe888.top/api/sources/{source_id}/latest
 | `PODCAST_VOICE_MALE` | zh-CN-YunxiNeural | 男声 voice |
 | `PODCAST_VOICE_FEMALE` | zh-CN-XiaoxiaoNeural | 女声 voice |
 | `PODCAST_VOICE_MALE_RATE` | -4% | 男声语速，传给 edge-tts |
-| `PODCAST_VOICE_FEMALE_RATE` | 0% | 女声语速，传给 edge-tts |
+| `PODCAST_VOICE_FEMALE_RATE` | +0% | 女声语速，传给 edge-tts |
 | `PODCAST_VOICE_MALE_PITCH` | -2Hz | 男声音调，传给 edge-tts |
 | `PODCAST_VOICE_FEMALE_PITCH` | +0Hz | 女声音调，传给 edge-tts |
 | `PODCAST_VOICE_MALE_VOLUME` | +0% | 男声音量，传给 edge-tts |

@@ -141,6 +141,9 @@
             {{ podcastEmptyText }}
           </div>
           <div v-else>
+            <div v-if="podcastNotice" class="podcast-notice">
+              {{ podcastNotice }}
+            </div>
             <section class="podcast-episode">
               <div class="podcast-episode-main">
                 <span class="podcast-kicker">{{ t('podcastKicker') }}</span>
@@ -293,12 +296,14 @@ const I18N = {
     podcastNavCategory: '自动音频日报',
     podcastTitle: '今日 AI 播客',
     podcastEmpty: '今日播客生成中',
-    podcastHistoryEmpty: '该日期播客尚未生成',
+    podcastHistoryEmpty: '该日期播客尚未生成或生成失败',
     podcastLoadErr: '加载播客失败：',
     podcastKicker: '最新一期 · 自动生成',
     podcastSources: '个来源',
     podcastItems: '条内容',
     podcastChapters: '本期章节',
+    podcastLatestFailedNotice: '今日播客生成失败，正在展示最近一期',
+    podcastLatestMissingNotice: '今日播客尚未生成，正在展示最近一期',
   },
   en: {
     siteTitle: 'Daily AI Frontier',
@@ -337,12 +342,14 @@ const I18N = {
     podcastNavCategory: 'Auto audio digest',
     podcastTitle: 'Daily AI Podcast',
     podcastEmpty: 'Podcast is being generated',
-    podcastHistoryEmpty: 'Podcast has not been generated for this date',
+    podcastHistoryEmpty: 'Podcast has not been generated or failed for this date',
     podcastLoadErr: 'Failed to load podcast: ',
     podcastKicker: 'Latest episode · Auto-generated',
     podcastSources: 'sources',
     podcastItems: 'items',
     podcastChapters: 'Chapters',
+    podcastLatestFailedNotice: 'Today\'s podcast failed. Showing the latest successful episode',
+    podcastLatestMissingNotice: 'Today\'s podcast is not ready. Showing the latest successful episode',
   }
 };
 
@@ -461,6 +468,7 @@ export default {
       latestPodcast: null,
       podcastLoading: false,
       podcastError: '',
+      podcastNotice: '',
       countdownText: '',
       countdownFullText: '',
       countdownTimer: null
@@ -639,17 +647,22 @@ export default {
     },
     async selectPodcast() {
       this.activeSourceId = PODCAST_SOURCE_ID;
-      this.historyMode = false;
-      this.selectedHistoryDate = '';
       this.items = [];
       this.errorMessage = '';
-      await this.loadPodcast();
+      if (this.historyMode && this.selectedHistoryDate) {
+        await this.loadPodcastByDate(this.selectedHistoryDate);
+      } else {
+        this.historyMode = false;
+        this.selectedHistoryDate = '';
+        await this.loadPodcast();
+      }
       await this.$nextTick();
       this.resetFeedScroll();
     },
     async loadPodcast() {
       this.podcastLoading = true;
       this.podcastError = '';
+      this.podcastNotice = '';
       try {
         const latestResponse = await fetch(`${API_PREFIX}/podcast/latest`);
         if (!latestResponse.ok) {
@@ -657,6 +670,17 @@ export default {
         }
         const latestPayload = await latestResponse.json();
         this.latestPodcast = latestPayload.podcast || null;
+        if (
+          this.latestPodcast &&
+          latestPayload.target_date &&
+          latestPayload.target_date !== this.latestPodcast.date
+        ) {
+          if (latestPayload.target_status === 'failed') {
+            this.podcastNotice = this.t('podcastLatestFailedNotice');
+          } else if (latestPayload.target_status === 'missing') {
+            this.podcastNotice = this.t('podcastLatestMissingNotice');
+          }
+        }
       } catch (error) {
         this.latestPodcast = null;
         this.podcastError = `${this.t('podcastLoadErr')}${error.message}`;
@@ -667,6 +691,7 @@ export default {
     async loadPodcastByDate(dateText) {
       this.podcastLoading = true;
       this.podcastError = '';
+      this.podcastNotice = '';
       try {
         const response = await fetch(`${API_PREFIX}/podcast/dates/${dateText}`);
         if (response.status === 404) {
@@ -1602,6 +1627,17 @@ a {
 }
 
 /* ── Podcast ─────────────────────────────── */
+
+.podcast-notice {
+  margin: 18px 24px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: 8px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 13px;
+  line-height: 1.5;
+}
 
 .podcast-episode {
   display: grid;

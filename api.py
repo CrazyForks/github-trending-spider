@@ -23,6 +23,7 @@ from rss_builder import build_rss_feed
 from scheduler import start_scheduler, stop_scheduler
 from source_registry import SOURCE_DEFINITIONS, get_source_by_id
 from logging_config import setup_logging
+from podcast_builder import resolve_target_content_date
 from podcast_store import (
     get_podcast_audio_file,
     is_valid_podcast_date,
@@ -170,18 +171,28 @@ def get_history_source(source_id, date_text):
 @app.get("/api/podcast/latest")
 def get_latest_podcast():
     """返回最新成功生成的每日 AI 播客元数据。"""
+    target_date = resolve_target_content_date()
+    target_metadata = load_podcast_metadata(target_date)
+    target_status = target_metadata.get("status") if target_metadata else "missing"
+    target_error = target_metadata.get("error", "") if target_metadata else ""
     metadata = load_latest_podcast_metadata()
     if not metadata:
         logger.info("[播客] 请求最新播客 | 状态=empty")
         return {
             "status": "empty",
             "podcast": None,
+            "target_date": target_date,
+            "target_status": target_status,
+            "target_error": target_error,
         }
 
     logger.info("[播客] 请求最新播客 | 日期=%s", metadata.get("date", ""))
     return {
         "status": metadata.get("status", "success"),
         "podcast": metadata,
+        "target_date": target_date,
+        "target_status": target_status,
+        "target_error": target_error,
     }
 
 

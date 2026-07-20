@@ -24,19 +24,40 @@ from api import (  # noqa: E402
 
 class TestPodcastApi(unittest.TestCase):
     def test_latest_empty(self):
-        with patch("api.load_latest_podcast_metadata", return_value=None):
+        with patch("api.resolve_target_content_date", return_value="2026-07-19"), \
+                patch("api.load_podcast_metadata", return_value=None), \
+                patch("api.load_latest_podcast_metadata", return_value=None):
             result = get_latest_podcast()
 
         self.assertEqual(result["status"], "empty")
         self.assertIsNone(result["podcast"])
+        self.assertEqual(result["target_date"], "2026-07-19")
+        self.assertEqual(result["target_status"], "missing")
 
     def test_latest_success(self):
         metadata = {"date": "2026-07-19", "status": "success"}
-        with patch("api.load_latest_podcast_metadata", return_value=metadata):
+        with patch("api.resolve_target_content_date", return_value="2026-07-19"), \
+                patch("api.load_podcast_metadata", return_value=metadata), \
+                patch("api.load_latest_podcast_metadata", return_value=metadata):
             result = get_latest_podcast()
 
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["podcast"], metadata)
+        self.assertEqual(result["target_status"], "success")
+
+    def test_latest_exposes_failed_target_when_falling_back_to_previous_success(self):
+        latest_metadata = {"date": "2026-07-18", "status": "success"}
+        failed_target = {"date": "2026-07-19", "status": "failed", "error": "Invalid rate '0%'."}
+        with patch("api.resolve_target_content_date", return_value="2026-07-19"), \
+                patch("api.load_podcast_metadata", return_value=failed_target), \
+                patch("api.load_latest_podcast_metadata", return_value=latest_metadata):
+            result = get_latest_podcast()
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["podcast"], latest_metadata)
+        self.assertEqual(result["target_date"], "2026-07-19")
+        self.assertEqual(result["target_status"], "failed")
+        self.assertEqual(result["target_error"], "Invalid rate '0%'.")
 
     def test_history(self):
         podcasts = [{"date": "2026-07-19", "status": "success"}]

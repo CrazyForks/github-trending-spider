@@ -13,6 +13,7 @@ sys.path.insert(0, ".")
 
 from podcast_tts import (  # noqa: E402
     _merge_paths_and_timeline,
+    _normalize_edge_tts_signed_value,
     _pause_after_turn,
     _prepare_tts_text,
     _segment_paths_with_turn_pause,
@@ -158,6 +159,33 @@ class TestPodcastTts(unittest.TestCase):
                 self.assertEqual(output_path.read_bytes(), b"mp3")
                 self.assertEqual(synthesize.call_count, 2)
                 sleep.assert_called_once()
+
+    def test_normalize_edge_tts_signed_value_adds_missing_plus_sign(self):
+        self.assertEqual(_normalize_edge_tts_signed_value("0%", "%"), "+0%")
+        self.assertEqual(_normalize_edge_tts_signed_value("3%", "%"), "+3%")
+        self.assertEqual(_normalize_edge_tts_signed_value("-4%", "%"), "-4%")
+        self.assertEqual(_normalize_edge_tts_signed_value("0Hz", "Hz"), "+0Hz")
+
+    def test_synthesize_edge_segment_normalizes_options_before_edge_tts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "001-female.mp3"
+
+            def write_audio(text, voice, path, rate, pitch, volume):
+                path.write_bytes(b"mp3")
+
+            with patch("podcast_tts._synthesize_edge_segment_once", side_effect=write_audio) as synthesize:
+                _synthesize_edge_segment(
+                    "台词",
+                    "voice",
+                    output_path,
+                    rate="0%",
+                    pitch="0Hz",
+                    volume="0%",
+                )
+
+        self.assertEqual(synthesize.call_args.args[3], "+0%")
+        self.assertEqual(synthesize.call_args.args[4], "+0Hz")
+        self.assertEqual(synthesize.call_args.args[5], "+0%")
 
     def test_empty_turns_fail(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -106,7 +106,7 @@ All config via environment variables with sensible defaults:
 | `PODCAST_VOICE_MALE` | zh-CN-YunxiNeural | Male voice |
 | `PODCAST_VOICE_FEMALE` | zh-CN-XiaoxiaoNeural | Female voice |
 | `PODCAST_VOICE_MALE_RATE` | -4% | Male voice rate passed to edge-tts |
-| `PODCAST_VOICE_FEMALE_RATE` | 0% | Female voice rate passed to edge-tts |
+| `PODCAST_VOICE_FEMALE_RATE` | +0% | Female voice rate passed to edge-tts |
 | `PODCAST_VOICE_MALE_PITCH` | -2Hz | Male voice pitch passed to edge-tts |
 | `PODCAST_VOICE_FEMALE_PITCH` | +0Hz | Female voice pitch passed to edge-tts |
 | `PODCAST_VOICE_MALE_VOLUME` | +0% | Male voice volume passed to edge-tts |

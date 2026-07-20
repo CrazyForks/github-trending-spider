@@ -121,6 +121,9 @@ def _prepare_tts_text(text):
 
 
 def _synthesize_edge_segment(text, voice, output_path, rate="+0%", pitch="+0Hz", volume="+0%"):
+    rate = _normalize_edge_tts_signed_value(rate, "%")
+    pitch = _normalize_edge_tts_signed_value(pitch, "Hz")
+    volume = _normalize_edge_tts_signed_value(volume, "%")
     max_retries = max(1, PODCAST_TTS_MAX_RETRIES)
     last_error = None
     for attempt in range(1, max_retries + 1):
@@ -151,6 +154,18 @@ def _synthesize_edge_segment(text, voice, output_path, rate="+0%", pitch="+0Hz",
             _sleep_before_tts_retry(attempt)
 
     raise last_error
+
+
+def _normalize_edge_tts_signed_value(value, suffix):
+    """edge-tts 的 rate/pitch/volume 需要显式正负号，0 也要写成 +0。"""
+    text = str(value or "").strip()
+    if not text:
+        return "+0{}".format(suffix)
+    if text.startswith("+") or text.startswith("-"):
+        return text
+    if text.endswith(suffix):
+        return "+{}".format(text)
+    return text
 
 
 def _synthesize_edge_segment_once(text, voice, output_path, rate, pitch, volume):
