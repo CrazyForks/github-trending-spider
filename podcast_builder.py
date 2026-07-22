@@ -5,9 +5,13 @@
 
 import json
 import logging
+import os
 import re
+import shutil
+import tempfile
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import requests
 
@@ -32,13 +36,17 @@ from podcast_store import (
     acquire_podcast_lock,
     build_failed_metadata,
     has_successful_podcast,
+    is_valid_podcast_date,
+    load_podcast_metadata,
     load_podcast_script,
+    podcast_audio_path,
     podcast_dir,
+    podcast_metadata_path,
     release_podcast_lock,
     write_podcast_metadata,
     write_podcast_script,
 )
-from podcast_tts import synthesize_podcast
+from podcast_tts import merge_existing_podcast, synthesize_podcast
 from source_registry import SOURCE_DEFINITIONS
 
 logger = logging.getLogger(__name__)
@@ -130,6 +138,128 @@ def run_podcast_generation(scheduled_time=None, output_dir=OUTPUT_ARCHIVE_DIR):
         return {"status": "failed", "date": date_text, "error": str(e)}
     finally:
         release_podcast_lock(date_text, output_dir)
+
+
+def rebuild_podcast_audio(date_text, output_dir=OUTPUT_ARCHIVE_DIR):
+    """复用指定日期已有脚本和语音片段，重新合并音频并回填 metadata。"""
+    if not is_valid_podcast_date(date_text):
+        return {"status": "failed", "date": date_text, "error": "播客日期无效"}
+
+    existing_metadata = load_podcast_metadata(date_text, output_dir)
+    if not existing_metadata:
+        return {"status": "failed", "date": date_text, "error": "播客 metadata 不存在"}
+    if existing_metadata.get("date") != date_text:
+        return {"status": "failed", "date": date_text, "error": "播客 metadata 日期与目标日期不一致"}
+
+    script = load_reusable_podcast_script(date_text, output_dir)
+    if not script:
+        return {"status": "failed", "date": date_text, "error": "播客脚本不存在或不可复用"}
+
+    if not acquire_podcast_lock(date_text, output_dir):
+        logger.warning("[播客] %s 已有任务运行中，跳过音频重合并", date_text)
+        return {"status": "skipped", "reason": "locked", "date": date_text}
+
+    snapshots = []
+    try:
+        snapshot_paths = [
+            podcast_audio_path(date_text, output_dir),
+            podcast_metadata_path(date_text, output_dir),
+        ]
+        for path in snapshot_paths:
+            snapshots.append(_snapshot_rebuild_file(path))
+
+        tts_result = merge_existing_podcast(
+            script.get("turns", []),
+            podcast_dir(date_text, output_dir),
+        )
+        duration_seconds = tts_result.get("duration_seconds", 0)
+        metadata = dict(existing_metadata)
+        metadata.update(
+            {
+                "title": existing_metadata.get("title") or script.get("title")
+                or "{} AI 音频日报".format(date_text),
+                "summary": existing_metadata.get("summary") or script.get("summary", ""),
+                "audio_url": "/api/podcasts/{}/podcast.mp3".format(date_text),
+                "duration_seconds": duration_seconds,
+                "generated_at": datetime.now().isoformat(timespec="seconds"),
+                "status": "success",
+                "error": "",
+                "chapters": build_timed_chapters(
+                    script.get("chapters", []),
+                    tts_result.get("turn_timeline", []),
+                    duration_seconds,
+                ),
+            }
+        )
+        write_podcast_metadata(
+            metadata,
+            output_dir,
+            update_latest=True,
+        )
+        logger.info("[播客] %s 已复用现有语音片段完成重合并", date_text)
+        _discard_rebuild_snapshots(snapshots)
+        snapshots = []
+        return {"status": "success", "date": date_text, "metadata": metadata}
+    except Exception as e:
+        _restore_rebuild_snapshots(snapshots)
+        snapshots = []
+        logger.exception("[播客] %s 音频重合并失败，保留原文件和 metadata: %s", date_text, e)
+        return {"status": "failed", "date": date_text, "error": str(e)}
+    finally:
+        _discard_rebuild_snapshots(snapshots)
+        release_podcast_lock(date_text, output_dir)
+
+
+def _snapshot_rebuild_file(path):
+    """为重合并可能改写的正式文件创建同目录临时快照。"""
+    target = Path(path)
+    snapshot = {"target": target, "backup": None, "existed": target.exists()}
+    if not snapshot["existed"]:
+        return snapshot
+
+    fd, backup_name = tempfile.mkstemp(
+        prefix=".{}-rebuild-".format(target.name),
+        suffix=".bak",
+        dir=str(target.parent),
+    )
+    os.close(fd)
+    backup_path = Path(backup_name)
+    try:
+        shutil.copy2(str(target), str(backup_path))
+    except Exception:
+        try:
+            backup_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+    snapshot["backup"] = backup_path
+    return snapshot
+
+
+def _restore_rebuild_snapshots(snapshots):
+    for snapshot in reversed(snapshots):
+        target = snapshot["target"]
+        backup = snapshot["backup"]
+        try:
+            if snapshot["existed"] and backup and backup.exists():
+                backup.replace(target)
+            elif not snapshot["existed"]:
+                try:
+                    target.unlink()
+                except FileNotFoundError:
+                    pass
+        except Exception as e:
+            logger.exception("[播客] 回滚重合并文件失败 | 文件=%s | 错误=%s", target, e)
+
+
+def _discard_rebuild_snapshots(snapshots):
+    for snapshot in snapshots:
+        backup = snapshot.get("backup")
+        if backup:
+            try:
+                backup.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def load_podcast_source_snapshots(date_text, output_dir=OUTPUT_ARCHIVE_DIR):

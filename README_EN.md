@@ -121,7 +121,15 @@ All config via environment variables with sensible defaults:
 | `PODCAST_MIN_TURN_COUNT` | 30 | Minimum turn count for a newly generated script before one retry |
 | `PODCAST_MIN_SCRIPT_CHARS` | 1600 | Minimum script text characters before one retry |
 
-Daily podcast generation also requires the system command `ffmpeg` and the Python package `edge-tts`. Script generation reuses `GITHUB_TOKEN` for GitHub Models and does not require `OPENAI_API_KEY`.
+Daily podcast generation also requires the system command `ffmpeg` (including `ffprobe`) and the Python package `edge-tts`. Script generation reuses `GITHUB_TOKEN` for GitHub Models and does not require `OPENAI_API_KEY`.
+
+If the script and speech segments already exist, rebuild only the merged audio for a date with:
+
+```bash
+python3 scripts/rebuild_podcast_audio.py --date 2026-07-21
+```
+
+This command does not call GitHub Models or edge-tts again. It validates every speech segment, recreates silence with the matching audio format, validates the merged duration, and updates metadata only after a successful rebuild.
 Podcast environment variables are read when the backend process starts. Restart the backend after changing `PODCAST_ENABLED` or other podcast settings.
 
 > Full configuration options in `config.py`

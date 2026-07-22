@@ -21,9 +21,11 @@ from podcast_builder import (  # noqa: E402
     _normalize_script_payload,
     load_podcast_source_snapshots,
     resolve_target_content_date,
+    rebuild_podcast_audio,
     run_podcast_generation,
 )
 from podcast_store import (  # noqa: E402
+    load_latest_podcast_metadata,
     load_podcast_metadata,
     write_podcast_metadata,
     write_podcast_script,
@@ -191,6 +193,216 @@ class TestPodcastBuilder(unittest.TestCase):
             self.assertEqual(result["status"], "success")
             self.assertEqual(metadata["title"], "已生成脚本")
             self.assertEqual(metadata["summary"], "已有脚本可以复用。")
+
+    def test_rebuild_podcast_audio_reuses_segments_and_updates_current_latest(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            date_text = "2026-07-19"
+            script = {
+                "title": "已有脚本",
+                "summary": "不重新生成脚本。",
+                "chapters": [{"time": "00:00", "title": "片头"}],
+                "turns": [{"role": "male", "chapter": "片头", "text": "完整台词。"}],
+            }
+            write_podcast_script(date_text, script, output_dir=temp_dir)
+            write_podcast_metadata(
+                {
+                    "date": date_text,
+                    "title": "原有标题",
+                    "summary": "原有摘要",
+                    "audio_url": "/api/podcasts/{}/podcast.mp3".format(date_text),
+                    "duration_seconds": 115,
+                    "generated_at": "2026-07-20T02:30:00",
+                    "source_count": 6,
+                    "item_count": 48,
+                    "status": "success",
+                    "error": "",
+                    "chapters": [],
+                },
+                output_dir=temp_dir,
+            )
+
+            with patch(
+                "podcast_builder.merge_existing_podcast",
+                return_value={
+                    "duration_seconds": 225,
+                    "turn_timeline": [{"chapter": "片头", "start_seconds": 0}],
+                },
+            ) as merge, patch(
+                "podcast_builder.build_podcast_script",
+                side_effect=AssertionError("should not call AI"),
+            ):
+                result = rebuild_podcast_audio(date_text, output_dir=temp_dir)
+
+            metadata = load_podcast_metadata(date_text, output_dir=temp_dir)
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(metadata["duration_seconds"], 225)
+            self.assertEqual(metadata["title"], "原有标题")
+            self.assertEqual(metadata["summary"], "原有摘要")
+            self.assertEqual(metadata["source_count"], 6)
+            self.assertEqual(metadata["item_count"], 48)
+            self.assertEqual(
+                load_latest_podcast_metadata(output_dir=temp_dir)["duration_seconds"],
+                225,
+            )
+            merge.assert_called_once()
+
+    def test_rebuild_old_date_does_not_replace_newer_latest(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            old_date = "2026-07-19"
+            new_date = "2026-07-20"
+            for date_text in (old_date, new_date):
+                write_podcast_script(
+                    date_text,
+                    {"turns": [{"role": "male", "text": "完整台词。"}]},
+                    output_dir=temp_dir,
+                )
+                write_podcast_metadata(
+                    {
+                        "date": date_text,
+                        "title": date_text,
+                        "audio_url": "/api/podcasts/{}/podcast.mp3".format(date_text),
+                        "duration_seconds": 115,
+                        "generated_at": "2026-07-21T02:30:00",
+                        "source_count": 1,
+                        "item_count": 1,
+                        "status": "success",
+                        "error": "",
+                        "chapters": [],
+                    },
+                    output_dir=temp_dir,
+                )
+
+            with patch(
+                "podcast_builder.merge_existing_podcast",
+                return_value={"duration_seconds": 225, "turn_timeline": []},
+            ):
+                result = rebuild_podcast_audio(old_date, output_dir=temp_dir)
+
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(load_latest_podcast_metadata(output_dir=temp_dir)["date"], new_date)
+
+    def test_rebuild_rejects_metadata_for_different_date(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            date_text = "2026-07-19"
+            target_dir = Path(temp_dir) / "podcasts" / date_text
+            target_dir.mkdir(parents=True)
+            with (target_dir / "metadata.json").open("w", encoding="utf-8") as f:
+                json.dump({"date": "2026-07-18", "status": "success"}, f)
+
+            with patch("podcast_builder.merge_existing_podcast") as merge:
+                result = rebuild_podcast_audio(date_text, output_dir=temp_dir)
+
+            self.assertEqual(result["status"], "failed")
+            self.assertIn("日期", result["error"])
+            merge.assert_not_called()
+
+    def test_rebuild_failure_preserves_success_metadata(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            date_text = "2026-07-19"
+            write_podcast_script(
+                date_text,
+                {"turns": [{"role": "male", "text": "完整台词。"}]},
+                output_dir=temp_dir,
+            )
+            original = {
+                "date": date_text,
+                "title": "原有标题",
+                "audio_url": "/api/podcasts/{}/podcast.mp3".format(date_text),
+                "duration_seconds": 115,
+                "generated_at": "2026-07-20T02:30:00",
+                "source_count": 6,
+                "item_count": 48,
+                "status": "success",
+                "error": "",
+                "chapters": [],
+            }
+            write_podcast_metadata(original, output_dir=temp_dir)
+
+            with patch(
+                "podcast_builder.merge_existing_podcast",
+                side_effect=FileNotFoundError("missing segment"),
+            ):
+                result = rebuild_podcast_audio(date_text, output_dir=temp_dir)
+
+            self.assertEqual(result["status"], "failed")
+            self.assertEqual(
+                load_podcast_metadata(date_text, output_dir=temp_dir),
+                original,
+            )
+
+    def test_metadata_write_failure_restores_original_audio_and_metadata(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            date_text = "2026-07-19"
+            write_podcast_script(
+                date_text,
+                {"turns": [{"role": "male", "text": "完整台词。"}]},
+                output_dir=temp_dir,
+            )
+            original = {
+                "date": date_text,
+                "title": "原有标题",
+                "audio_url": "/api/podcasts/{}/podcast.mp3".format(date_text),
+                "duration_seconds": 115,
+                "generated_at": "2026-07-20T02:30:00",
+                "source_count": 6,
+                "item_count": 48,
+                "status": "success",
+                "error": "",
+                "chapters": [],
+            }
+            write_podcast_metadata(original, output_dir=temp_dir)
+            audio_path = Path(temp_dir) / "podcasts" / date_text / "podcast.mp3"
+            audio_path.write_bytes(b"old-audio")
+
+            def replace_audio(_turns, target_dir):
+                (Path(target_dir) / "podcast.mp3").write_bytes(b"new-audio")
+                return {"duration_seconds": 225, "turn_timeline": []}
+
+            with patch(
+                "podcast_builder.merge_existing_podcast",
+                side_effect=replace_audio,
+            ), patch(
+                "podcast_builder.write_podcast_metadata",
+                side_effect=RuntimeError("metadata write failed"),
+            ):
+                result = rebuild_podcast_audio(date_text, output_dir=temp_dir)
+
+            self.assertEqual(result["status"], "failed")
+            self.assertEqual(audio_path.read_bytes(), b"old-audio")
+            self.assertEqual(load_podcast_metadata(date_text, output_dir=temp_dir), original)
+
+    def test_rebuild_podcast_audio_respects_existing_lock(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            date_text = "2026-07-19"
+            write_podcast_script(
+                date_text,
+                {"turns": [{"role": "male", "text": "完整台词。"}]},
+                output_dir=temp_dir,
+            )
+            write_podcast_metadata(
+                {
+                    "date": date_text,
+                    "title": "原有标题",
+                    "audio_url": "/api/podcasts/{}/podcast.mp3".format(date_text),
+                    "duration_seconds": 115,
+                    "generated_at": "2026-07-20T02:30:00",
+                    "source_count": 6,
+                    "item_count": 48,
+                    "status": "success",
+                    "error": "",
+                    "chapters": [],
+                },
+                output_dir=temp_dir,
+            )
+
+            with patch("podcast_builder.acquire_podcast_lock", return_value=False), patch(
+                "podcast_builder.merge_existing_podcast",
+            ) as merge:
+                result = rebuild_podcast_audio(date_text, output_dir=temp_dir)
+
+            self.assertEqual(result["status"], "skipped")
+            self.assertEqual(result["reason"], "locked")
+            merge.assert_not_called()
 
     def test_normalize_script_payload_filters_invalid_turns(self):
         payload = {

@@ -222,7 +222,15 @@ GET https://www.gdufe888.top/api/sources/{source_id}/latest
 | `PODCAST_MIN_TURN_COUNT` | 30 | 新生成脚本的最低有效对话轮数，不足会重试一次 |
 | `PODCAST_MIN_SCRIPT_CHARS` | 1600 | 新生成脚本的最低台词字符数，不足会重试一次 |
 
-每日播客还需要安装系统命令 `ffmpeg`，并在 Python 依赖中安装 `edge-tts`。脚本生成复用 `GITHUB_TOKEN` 调用 GitHub Models，不需要 `OPENAI_API_KEY`。
+每日播客还需要安装系统命令 `ffmpeg`（需同时包含 `ffprobe`），并在 Python 依赖中安装 `edge-tts`。脚本生成复用 `GITHUB_TOKEN` 调用 GitHub Models，不需要 `OPENAI_API_KEY`。
+
+如果脚本和分段语音已经生成，仅需重新合并指定日期的音频，可执行：
+
+```bash
+python3 scripts/rebuild_podcast_audio.py --date 2026-07-21
+```
+
+该命令不会重新请求 GitHub Models 或 edge-tts；它会校验全部语音片段、重新生成同采样率静音、校验最终时长，并在成功后更新该日期 metadata。
 播客相关环境变量在后端进程启动时读取；修改 `PODCAST_ENABLED` 或其他播客配置后，需要重启后端服务才会生效。
 
 > 完整配置项见源码 `config.py`

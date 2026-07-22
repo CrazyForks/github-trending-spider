@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from datetime import date, datetime
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, ".")
 
@@ -82,6 +83,52 @@ class TestPodcastStore(unittest.TestCase):
 
             self.assertIsNone(load_latest_podcast_metadata(output_dir=temp_dir))
             self.assertFalse(has_successful_podcast("2026-07-19", output_dir=temp_dir))
+
+    def test_success_metadata_can_skip_latest_update(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            write_podcast_metadata(self._metadata("2026-07-20"), output_dir=temp_dir)
+            write_podcast_metadata(
+                self._metadata("2026-07-19"),
+                output_dir=temp_dir,
+                update_latest=False,
+            )
+
+            latest = load_latest_podcast_metadata(output_dir=temp_dir)
+            historical = list_podcast_history(
+                days=7,
+                output_dir=temp_dir,
+                today=date(2026, 7, 20),
+            )
+
+            self.assertEqual(latest["date"], "2026-07-20")
+            self.assertEqual(
+                [item["date"] for item in historical],
+                ["2026-07-20", "2026-07-19"],
+            )
+
+    def test_older_success_never_moves_latest_backward(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            write_podcast_metadata(self._metadata("2026-07-20"), output_dir=temp_dir)
+            write_podcast_metadata(self._metadata("2026-07-19"), output_dir=temp_dir)
+
+            self.assertEqual(
+                load_latest_podcast_metadata(output_dir=temp_dir)["date"],
+                "2026-07-20",
+            )
+
+    def test_json_write_failure_preserves_existing_metadata(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original = self._metadata("2026-07-19")
+            write_podcast_metadata(original, output_dir=temp_dir)
+
+            with patch("podcast_store.json.dump", side_effect=RuntimeError("write failed")):
+                with self.assertRaises(RuntimeError):
+                    write_podcast_metadata(
+                        self._metadata("2026-07-20"),
+                        output_dir=temp_dir,
+                    )
+
+            self.assertEqual(load_latest_podcast_metadata(output_dir=temp_dir), original)
 
     def test_lock_prevents_duplicate_generation(self):
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -33,6 +33,12 @@ logger = logging.getLogger(__name__)
 MIN_MODEL_PAUSE_SECONDS = 0.6
 MAX_MODEL_PAUSE_SECONDS = 2.0
 ENDING_TURN_PAUSE_SECONDS = 0.7
+PODCAST_AUDIO_SAMPLE_RATE = 24000
+PODCAST_AUDIO_CHANNELS = 1
+PODCAST_SILENCE_BITRATE = "48k"
+PODCAST_OUTPUT_BITRATE = "128k"
+MERGED_DURATION_TOLERANCE_RATIO = 0.02
+MERGED_DURATION_TOLERANCE_MIN_SECONDS = 1.0
 
 
 def synthesize_podcast(turns, target_dir):
@@ -46,7 +52,27 @@ def synthesize_podcast(turns, target_dir):
     segments_dir = target_dir / "segments"
     segments_dir.mkdir(parents=True, exist_ok=True)
 
+    segment_infos = _collect_segment_infos(turns, segments_dir, synthesize=True)
+    return _merge_podcast_segments(segment_infos, target_dir)
+
+
+def merge_existing_podcast(turns, target_dir):
+    """复用已有语音片段重新生成停顿、最终音频和时间线。"""
+    if not turns:
+        raise ValueError("播客脚本为空，无法重新合并音频")
+
+    target_dir = Path(target_dir)
+    segments_dir = target_dir / "segments"
+    segment_infos = _collect_segment_infos(turns, segments_dir, synthesize=False)
+    return _merge_podcast_segments(segment_infos, target_dir)
+
+
+def _collect_segment_infos(turns, segments_dir, synthesize):
     segment_infos = []
+    segments_dir = Path(segments_dir)
+    if synthesize:
+        segments_dir.mkdir(parents=True, exist_ok=True)
+
     for index, turn in enumerate(turns, 1):
         role = turn.get("role", "")
         text = (turn.get("text") or "").strip()
@@ -55,10 +81,17 @@ def synthesize_podcast(turns, target_dir):
         text = _prepare_tts_text(text)
         if not text:
             continue
-        voice = _voice_for_role(role)
-        voice_options = _voice_options_for_role(role)
         segment_path = segments_dir / "{:03d}-{}.mp3".format(index, role or "speaker")
-        _synthesize_edge_segment(text, voice, segment_path, **voice_options)
+        if synthesize:
+            voice = _voice_for_role(role)
+            voice_options = _voice_options_for_role(role)
+            _synthesize_edge_segment(text, voice, segment_path, **voice_options)
+        elif not segment_path.exists() or segment_path.stat().st_size == 0:
+            raise FileNotFoundError("播客语音片段不存在或为空: {}".format(segment_path))
+
+        duration_seconds = _probe_duration_seconds_float(segment_path)
+        if duration_seconds <= 0:
+            raise RuntimeError("无法读取播客语音片段时长: {}".format(segment_path))
         segment_infos.append(
             {
                 "index": index,
@@ -67,18 +100,21 @@ def synthesize_podcast(turns, target_dir):
                 "text": text,
                 "chapter": _normalize_optional_text(turn.get("chapter")),
                 "pause_after_seconds": turn.get("pause_after_seconds"),
-                "duration_seconds": _probe_duration_seconds_float(segment_path),
+                "duration_seconds": duration_seconds,
             }
         )
 
     if not segment_infos:
         raise ValueError("播客脚本没有可合成文本")
+    return segment_infos
 
+
+def _merge_podcast_segments(segment_infos, target_dir):
     output_path = target_dir / "podcast.mp3"
-    timeline = _merge_segments(segment_infos, output_path)
+    timeline, duration_seconds = _merge_segments(segment_infos, output_path)
     return {
         "audio_path": str(output_path),
-        "duration_seconds": _probe_duration_seconds(output_path),
+        "duration_seconds": int(duration_seconds),
         "turn_timeline": timeline,
     }
 
@@ -201,8 +237,13 @@ def _sleep_before_tts_retry(attempt):
 def _merge_segments(segment_infos, output_path):
     if not shutil.which("ffmpeg"):
         raise RuntimeError("未找到 ffmpeg，无法合并播客音频")
+    if not shutil.which("ffprobe"):
+        raise RuntimeError("未找到 ffprobe，无法校验播客音频")
 
-    merge_paths, timeline = _merge_paths_and_timeline(segment_infos, output_path.parent)
+    merge_paths, timeline, expected_duration = _merge_paths_and_timeline(
+        segment_infos,
+        output_path.parent,
+    )
     list_path = output_path.parent / "segments.txt"
     with list_path.open("w", encoding="utf-8") as f:
         for segment_path in merge_paths:
@@ -221,16 +262,41 @@ def _merge_segments(segment_infos, output_path):
         str(list_path),
         "-af",
         "loudnorm=I=-16:TP=-1.5:LRA=11",
+        "-ar",
+        str(PODCAST_AUDIO_SAMPLE_RATE),
+        "-ac",
+        str(PODCAST_AUDIO_CHANNELS),
         "-acodec",
         "libmp3lame",
         "-b:a",
-        "128k",
+        PODCAST_OUTPUT_BITRATE,
         str(raw_output_path),
     ]
     logger.info("合并播客音频: %s", output_path)
-    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    raw_output_path.replace(output_path)
-    return timeline
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        actual_duration = _probe_duration_seconds_float(raw_output_path)
+        _validate_merged_duration(expected_duration, actual_duration)
+        raw_output_path.replace(output_path)
+    except Exception:
+        _remove_empty_or_partial_file(raw_output_path)
+        raise
+    return timeline, actual_duration
+
+
+def _validate_merged_duration(expected_duration, actual_duration):
+    tolerance = max(
+        MERGED_DURATION_TOLERANCE_MIN_SECONDS,
+        expected_duration * MERGED_DURATION_TOLERANCE_RATIO,
+    )
+    if actual_duration <= 0 or abs(actual_duration - expected_duration) > tolerance:
+        raise RuntimeError(
+            "播客音频时长校验失败: expected={:.3f}s, actual={:.3f}s, tolerance={:.3f}s".format(
+                expected_duration,
+                actual_duration,
+                tolerance,
+            )
+        )
 
 
 def _segment_paths_with_turn_pause(segment_paths, target_dir):
@@ -250,7 +316,7 @@ def _segment_paths_with_turn_pause(segment_paths, target_dir):
 
 def _merge_paths_and_timeline(segment_infos, target_dir):
     if not segment_infos:
-        return [], []
+        return [], [], 0.0
 
     merge_paths = []
     timeline = []
@@ -284,7 +350,7 @@ def _merge_paths_and_timeline(segment_infos, target_dir):
         merge_paths.append(silence_path)
         cursor += pause_seconds
 
-    return merge_paths, timeline
+    return merge_paths, timeline, round(cursor, 3)
 
 
 def _pause_after_turn(current, next_info):
@@ -343,26 +409,26 @@ def _ensure_silence_segment(output_path, duration_seconds):
         "-f",
         "lavfi",
         "-i",
-        "anullsrc=r=32000:cl=mono",
+        "anullsrc=r={}:cl=mono".format(PODCAST_AUDIO_SAMPLE_RATE),
         "-t",
         "{:.3f}".format(max(0.05, duration_seconds)),
+        "-ar",
+        str(PODCAST_AUDIO_SAMPLE_RATE),
+        "-ac",
+        str(PODCAST_AUDIO_CHANNELS),
         "-acodec",
         "libmp3lame",
         "-b:a",
-        "128k",
+        PODCAST_SILENCE_BITRATE,
         str(output_path),
     ]
     logger.info("生成播客转场静音: %s", output_path)
     subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
-def _probe_duration_seconds(audio_path):
-    return int(_probe_duration_seconds_float(audio_path))
-
-
 def _probe_duration_seconds_float(audio_path):
     if not shutil.which("ffprobe"):
-        return 0.0
+        raise RuntimeError("未找到 ffprobe，无法读取播客音频时长")
 
     cmd = [
         "ffprobe",

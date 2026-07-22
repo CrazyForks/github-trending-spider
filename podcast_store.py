@@ -4,9 +4,12 @@
 """
 
 import json
+import fcntl
 import logging
 import os
 import re
+import tempfile
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -54,6 +57,10 @@ def latest_metadata_path(output_dir=OUTPUT_ARCHIVE_DIR):
     return podcast_root(output_dir) / "latest.json"
 
 
+def latest_lock_path(output_dir=OUTPUT_ARCHIVE_DIR):
+    return podcast_root(output_dir) / ".latest.lock"
+
+
 def lock_path(date_text, output_dir=OUTPUT_ARCHIVE_DIR):
     return podcast_dir(date_text, output_dir) / ".lock"
 
@@ -72,8 +79,28 @@ def read_json_file(path):
 def write_json_file(path, payload):
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    with target.open("w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=".{}-".format(target.name),
+        suffix=".tmp",
+        dir=str(target.parent),
+    )
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        temp_path.replace(target)
+    except Exception:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def load_podcast_metadata(date_text, output_dir=OUTPUT_ARCHIVE_DIR):
@@ -172,14 +199,31 @@ def load_podcast_script(date_text, output_dir=OUTPUT_ARCHIVE_DIR):
     return read_json_file(podcast_script_path(date_text, output_dir))
 
 
-def write_podcast_metadata(metadata, output_dir=OUTPUT_ARCHIVE_DIR):
+def write_podcast_metadata(metadata, output_dir=OUTPUT_ARCHIVE_DIR, update_latest=True):
     date_text = metadata.get("date", "")
     if not is_valid_podcast_date(date_text):
         raise ValueError("播客日期无效: {}".format(date_text))
 
     write_json_file(podcast_metadata_path(date_text, output_dir), metadata)
-    if metadata.get("status") == "success":
-        write_json_file(latest_metadata_path(output_dir), metadata)
+    if metadata.get("status") == "success" and update_latest:
+        with _podcast_latest_lock(output_dir):
+            current_latest = read_json_file(latest_metadata_path(output_dir))
+            current_date = (current_latest or {}).get("date", "")
+            if not current_date or date_text >= current_date:
+                write_json_file(latest_metadata_path(output_dir), metadata)
+
+
+@contextmanager
+def _podcast_latest_lock(output_dir):
+    """串行保护跨日期共享的 latest.json，进程退出时由系统自动释放。"""
+    target = latest_lock_path(output_dir)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def build_failed_metadata(date_text, error, generated_at=None, source_count=0, item_count=0):

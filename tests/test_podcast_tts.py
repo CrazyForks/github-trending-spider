@@ -3,6 +3,8 @@
 每日 AI 播客 TTS 编排测试。
 """
 
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -12,12 +14,16 @@ from unittest.mock import patch
 sys.path.insert(0, ".")
 
 from podcast_tts import (  # noqa: E402
+    _ensure_silence_segment,
+    _merge_segments,
     _merge_paths_and_timeline,
     _normalize_edge_tts_signed_value,
     _pause_after_turn,
+    _probe_duration_seconds_float,
     _prepare_tts_text,
     _segment_paths_with_turn_pause,
     _synthesize_edge_segment,
+    merge_existing_podcast,
     synthesize_podcast,
 )
 
@@ -40,9 +46,8 @@ class TestPodcastTts(unittest.TestCase):
                     patch("podcast_tts.PODCAST_VOICE_MALE_VOLUME", "-1%"), \
                     patch("podcast_tts.PODCAST_VOICE_FEMALE_VOLUME", "+2%"), \
                     patch("podcast_tts._synthesize_edge_segment") as synthesize, \
-                    patch("podcast_tts._merge_segments") as merge, \
-                    patch("podcast_tts._probe_duration_seconds_float", return_value=1.0), \
-                    patch("podcast_tts._probe_duration_seconds", return_value=123):
+                    patch("podcast_tts._merge_segments", return_value=([], 123)) as merge, \
+                    patch("podcast_tts._probe_duration_seconds_float", return_value=1.0):
                 result = synthesize_podcast(turns, temp_dir)
 
         self.assertEqual(result["duration_seconds"], 123)
@@ -88,7 +93,7 @@ class TestPodcastTts(unittest.TestCase):
             with patch("podcast_tts.PODCAST_TURN_PAUSE_SECONDS", 0.8), \
                     patch("podcast_tts.PODCAST_CHAPTER_PAUSE_SECONDS", 1.6), \
                     patch("podcast_tts._ensure_silence_segment") as ensure_silence:
-                paths, timeline = _merge_paths_and_timeline(
+                paths, timeline, expected_duration = _merge_paths_and_timeline(
                     [
                         {
                             "index": 1,
@@ -113,7 +118,151 @@ class TestPodcastTts(unittest.TestCase):
         self.assertEqual(paths, [first, target_dir / "pause-1600ms.mp3", second])
         self.assertEqual(timeline[0]["start_seconds"], 0.0)
         self.assertEqual(timeline[1]["start_seconds"], 3.6)
+        self.assertEqual(expected_duration, 6.6)
         ensure_silence.assert_called_once_with(target_dir / "pause-1600ms.mp3", 1.6)
+
+    def test_silence_segment_uses_podcast_audio_format(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "pause-0800ms.mp3"
+            with patch("podcast_tts.subprocess.run") as run:
+                _ensure_silence_segment(output_path, 0.8)
+
+        command = run.call_args.args[0]
+        self.assertIn("anullsrc=r=24000:cl=mono", command)
+        self.assertEqual(command[command.index("-ar") + 1], "24000")
+        self.assertEqual(command[command.index("-ac") + 1], "1")
+        self.assertEqual(command[command.index("-b:a") + 1], "48k")
+
+    def test_merge_rejects_duration_mismatch_without_replacing_existing_audio(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_dir = Path(temp_dir)
+            segment_path = target_dir / "001-male.mp3"
+            segment_path.write_bytes(b"segment")
+            output_path = target_dir / "podcast.mp3"
+            output_path.write_bytes(b"existing-audio")
+
+            def write_raw_output(command, **kwargs):
+                Path(command[-1]).write_bytes(b"new-raw-audio")
+
+            with patch(
+                "podcast_tts._merge_paths_and_timeline",
+                return_value=([segment_path], [], 10.0),
+            ), patch("podcast_tts.shutil.which", return_value="/usr/bin/tool"), patch(
+                "podcast_tts.subprocess.run",
+                side_effect=write_raw_output,
+            ), patch("podcast_tts._probe_duration_seconds_float", return_value=5.0):
+                with self.assertRaisesRegex(RuntimeError, "时长校验失败"):
+                    _merge_segments([], output_path)
+
+            self.assertEqual(output_path.read_bytes(), b"existing-audio")
+            self.assertFalse((target_dir / "podcast-raw.mp3").exists())
+
+    def test_merge_existing_podcast_requires_every_segment(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaisesRegex(FileNotFoundError, "001-male.mp3"):
+                merge_existing_podcast(
+                    [{"role": "male", "text": "已有脚本台词。"}],
+                    temp_dir,
+                )
+
+    def test_merge_existing_podcast_never_calls_edge_tts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_dir = Path(temp_dir)
+            segments_dir = target_dir / "segments"
+            segments_dir.mkdir()
+            (segments_dir / "001-male.mp3").write_bytes(b"segment")
+            turns = [{"role": "male", "text": "已有语音。"}]
+
+            with patch("podcast_tts._probe_duration_seconds_float", return_value=1.0), patch(
+                "podcast_tts._merge_podcast_segments",
+                return_value={"duration_seconds": 1, "turn_timeline": []},
+            ), patch("podcast_tts._synthesize_edge_segment") as edge_tts:
+                result = merge_existing_podcast(turns, target_dir)
+
+            self.assertEqual(result["duration_seconds"], 1)
+            edge_tts.assert_not_called()
+
+    @unittest.skipUnless(
+        shutil.which("ffmpeg") and shutil.which("ffprobe"),
+        "需要 ffmpeg 和 ffprobe",
+    )
+    def test_real_merge_preserves_expected_duration_and_audio_format(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_dir = Path(temp_dir)
+            first = target_dir / "001-male.mp3"
+            second = target_dir / "002-female.mp3"
+            self._create_test_tone(first, 0.8, 440)
+            self._create_test_tone(second, 1.0, 660)
+            first_duration = _probe_duration_seconds_float(first)
+            second_duration = _probe_duration_seconds_float(second)
+
+            with patch("podcast_tts.PODCAST_TURN_PAUSE_SECONDS", 0.8):
+                _, actual_duration = _merge_segments(
+                    [
+                        {
+                            "index": 1,
+                            "path": first,
+                            "role": "male",
+                            "text": "第一段。",
+                            "duration_seconds": first_duration,
+                        },
+                        {
+                            "index": 2,
+                            "path": second,
+                            "role": "female",
+                            "text": "第二段。",
+                            "duration_seconds": second_duration,
+                        },
+                    ],
+                    target_dir / "podcast.mp3",
+                )
+
+            expected_duration = first_duration + 0.8 + second_duration
+            self.assertAlmostEqual(actual_duration, expected_duration, delta=0.25)
+            stream_info = subprocess.check_output(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "a:0",
+                    "-show_entries",
+                    "stream=sample_rate,channels",
+                    "-of",
+                    "csv=p=0",
+                    str(target_dir / "podcast.mp3"),
+                ],
+                text=True,
+            ).strip()
+            self.assertEqual(stream_info, "24000,1")
+
+    def _create_test_tone(self, path, duration_seconds, frequency):
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency={}:sample_rate=24000".format(frequency),
+                "-t",
+                str(duration_seconds),
+                "-ar",
+                "24000",
+                "-ac",
+                "1",
+                "-acodec",
+                "libmp3lame",
+                "-b:a",
+                "48k",
+                str(path),
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
 
     def test_pause_after_turn_clamps_model_pause(self):
         with patch("podcast_tts.PODCAST_TURN_PAUSE_SECONDS", 0.8):

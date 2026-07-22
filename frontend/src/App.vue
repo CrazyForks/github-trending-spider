@@ -155,12 +155,35 @@
                   <span>{{ latestPodcast.source_count }} {{ t('podcastSources') }}</span>
                   <span>{{ latestPodcast.item_count }} {{ t('podcastItems') }}</span>
                 </div>
-                <audio
-                  class="podcast-player"
-                  controls
-                  preload="none"
-                  :src="latestPodcast.audio_url"
-                ></audio>
+                <div class="podcast-player-row">
+                  <audio
+                    ref="podcastPlayer"
+                    class="podcast-player"
+                    controls
+                    preload="none"
+                    :src="latestPodcast.audio_url"
+                    @loadedmetadata="applyPodcastPlaybackRate"
+                    @play="applyPodcastPlaybackRate"
+                  ></audio>
+                  <div
+                    class="podcast-speed-control"
+                    role="group"
+                    :aria-label="t('podcastPlaybackSpeed')"
+                  >
+                    <span class="podcast-speed-label">{{ t('podcastPlaybackSpeed') }}</span>
+                    <button
+                      v-for="rate in podcastPlaybackRates"
+                      :key="rate"
+                      class="podcast-speed-button"
+                      :class="{ active: podcastPlaybackRate === rate }"
+                      type="button"
+                      :aria-pressed="podcastPlaybackRate === rate"
+                      @click="setPodcastPlaybackRate(rate)"
+                    >
+                      {{ formatPlaybackRate(rate) }}
+                    </button>
+                  </div>
+                </div>
               </div>
               <aside class="podcast-chapters" v-if="latestPodcast.chapters && latestPodcast.chapters.length">
                 <h4>{{ t('podcastChapters') }}</h4>
@@ -236,6 +259,8 @@
 const API_PREFIX = '/api';
 const PODCAST_SOURCE_ID = '__podcast__';
 const THEME_STORAGE_KEY = 'theme';
+const PODCAST_PLAYBACK_RATE_STORAGE_KEY = 'podcastPlaybackRate';
+const PODCAST_PLAYBACK_RATES = [1, 1.25, 1.5, 2];
 const MOBILE_LAYOUT_QUERY = '(max-width: 860px)';
 
 // ── i18n：语言优先级 URL 参数 > localStorage > 默认 'zh' ──
@@ -256,6 +281,11 @@ function getInitialTheme() {
     return 'dark';
   }
   return 'light';
+}
+
+function getInitialPodcastPlaybackRate() {
+  const stored = Number(localStorage.getItem(PODCAST_PLAYBACK_RATE_STORAGE_KEY));
+  return PODCAST_PLAYBACK_RATES.includes(stored) ? stored : 1;
 }
 
 const I18N = {
@@ -302,6 +332,7 @@ const I18N = {
     podcastSources: '个来源',
     podcastItems: '条内容',
     podcastChapters: '本期章节',
+    podcastPlaybackSpeed: '播放速度',
     podcastLatestFailedNotice: '今日播客生成失败，正在展示最近一期',
     podcastLatestMissingNotice: '今日播客尚未生成，正在展示最近一期',
   },
@@ -348,6 +379,7 @@ const I18N = {
     podcastSources: 'sources',
     podcastItems: 'items',
     podcastChapters: 'Chapters',
+    podcastPlaybackSpeed: 'Speed',
     podcastLatestFailedNotice: 'Today\'s podcast failed. Showing the latest successful episode',
     podcastLatestMissingNotice: 'Today\'s podcast is not ready. Showing the latest successful episode',
   }
@@ -469,6 +501,8 @@ export default {
       podcastLoading: false,
       podcastError: '',
       podcastNotice: '',
+      podcastPlaybackRate: getInitialPodcastPlaybackRate(),
+      podcastPlaybackRates: PODCAST_PLAYBACK_RATES,
       countdownText: '',
       countdownFullText: '',
       countdownTimer: null
@@ -687,6 +721,8 @@ export default {
       } finally {
         this.podcastLoading = false;
       }
+      await this.$nextTick();
+      this.applyPodcastPlaybackRate();
     },
     async loadPodcastByDate(dateText) {
       this.podcastLoading = true;
@@ -710,7 +746,28 @@ export default {
         this.podcastLoading = false;
       }
       await this.$nextTick();
+      this.applyPodcastPlaybackRate();
       this.resetFeedScroll();
+    },
+    setPodcastPlaybackRate(rate) {
+      const normalizedRate = Number(rate);
+      if (!PODCAST_PLAYBACK_RATES.includes(normalizedRate)) {
+        return;
+      }
+      this.podcastPlaybackRate = normalizedRate;
+      localStorage.setItem(PODCAST_PLAYBACK_RATE_STORAGE_KEY, String(normalizedRate));
+      this.applyPodcastPlaybackRate();
+    },
+    applyPodcastPlaybackRate() {
+      const player = this.$refs.podcastPlayer;
+      if (!player) {
+        return;
+      }
+      player.defaultPlaybackRate = this.podcastPlaybackRate;
+      player.playbackRate = this.podcastPlaybackRate;
+    },
+    formatPlaybackRate(rate) {
+      return `${rate}×`;
     },
     formatDuration(seconds) {
       const totalSeconds = Number(seconds || 0);
@@ -1694,9 +1751,69 @@ a {
   font-size: 12px;
 }
 
-.podcast-player {
-  width: min(560px, 100%);
+.podcast-player-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-top: 16px;
+}
+
+.podcast-player {
+  width: auto;
+  min-width: 280px;
+  flex: 1 1 360px;
+}
+
+.podcast-speed-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.podcast-speed-label {
+  padding: 0 5px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.podcast-speed-button {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
+}
+
+.podcast-speed-button:hover {
+  border-color: var(--accent-border);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.podcast-speed-button.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #FFFFFF;
+}
+
+.podcast-speed-button:focus-visible {
+  outline: 3px solid var(--accent-border);
+  outline-offset: 2px;
 }
 
 .podcast-chapters {
@@ -1886,6 +2003,22 @@ a {
 
   .podcast-episode {
     padding: 16px;
+  }
+
+  .podcast-player-row {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .podcast-player {
+    width: 100%;
+    min-width: 0;
+    flex-basis: 100%;
+  }
+
+  .podcast-speed-control {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .back-today-button {
