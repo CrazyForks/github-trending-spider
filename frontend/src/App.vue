@@ -162,8 +162,11 @@
                     controls
                     preload="none"
                     :src="latestPodcast.audio_url"
-                    @loadedmetadata="applyPodcastPlaybackRate"
+                    @loadedmetadata="restorePodcastPlaybackState"
                     @play="applyPodcastPlaybackRate"
+                    @timeupdate="handlePodcastTimeUpdate"
+                    @pause="savePodcastPlaybackProgress"
+                    @ended="handlePodcastEnded"
                   ></audio>
                   <div
                     class="podcast-speed-control"
@@ -261,20 +264,42 @@ const PODCAST_SOURCE_ID = '__podcast__';
 const THEME_STORAGE_KEY = 'theme';
 const PODCAST_PLAYBACK_RATE_STORAGE_KEY = 'podcastPlaybackRate';
 const PODCAST_PLAYBACK_RATES = [1, 1.25, 1.5, 2];
+const PODCAST_PROGRESS_STORAGE_KEY = 'podcastPlaybackProgress:v1';
+const PODCAST_PROGRESS_STORAGE_VERSION = 1;
+const PODCAST_PROGRESS_SAVE_INTERVAL_MS = 2000;
+const PODCAST_PROGRESS_COMPLETION_THRESHOLD_SECONDS = 3;
+const PODCAST_PROGRESS_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+const PODCAST_PROGRESS_MAX_EPISODES = 30;
 const MOBILE_LAYOUT_QUERY = '(max-width: 860px)';
+
+function getLocalStorageItem(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch (error) {
+    return null;
+  }
+}
+
+function setLocalStorageItem(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (error) {
+    // 浏览器禁用或清理 localStorage 时，保留当前页面内的正常交互。
+  }
+}
 
 // ── i18n：语言优先级 URL 参数 > localStorage > 默认 'zh' ──
 function getInitialLang() {
   const params = new URLSearchParams(window.location.search);
   const urlLang = params.get('lang');
   if (urlLang === 'en' || urlLang === 'zh') return urlLang;
-  const stored = localStorage.getItem('lang');
+  const stored = getLocalStorageItem('lang');
   if (stored === 'en' || stored === 'zh') return stored;
   return 'zh';
 }
 
 function getInitialTheme() {
-  const stored = localStorage.getItem(THEME_STORAGE_KEY);
+  const stored = getLocalStorageItem(THEME_STORAGE_KEY);
   if (stored === 'light' || stored === 'dark') return stored;
 
   if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
@@ -284,8 +309,80 @@ function getInitialTheme() {
 }
 
 function getInitialPodcastPlaybackRate() {
-  const stored = Number(localStorage.getItem(PODCAST_PLAYBACK_RATE_STORAGE_KEY));
+  const stored = Number(getLocalStorageItem(PODCAST_PLAYBACK_RATE_STORAGE_KEY));
   return PODCAST_PLAYBACK_RATES.includes(stored) ? stored : 1;
+}
+
+function createEmptyPodcastProgressStore() {
+  return {
+    version: PODCAST_PROGRESS_STORAGE_VERSION,
+    episodes: {}
+  };
+}
+
+function normalizePodcastProgressStore(value, now = Date.now()) {
+  const normalized = createEmptyPodcastProgressStore();
+  if (
+    !value ||
+    value.version !== PODCAST_PROGRESS_STORAGE_VERSION ||
+    !value.episodes ||
+    typeof value.episodes !== 'object' ||
+    Array.isArray(value.episodes)
+  ) {
+    return normalized;
+  }
+
+  const validEntries = Object.entries(value.episodes)
+    .filter(([key, progress]) => {
+      if (!key || !progress || typeof progress !== 'object') {
+        return false;
+      }
+      const position = Number(progress.position);
+      const duration = Number(progress.duration);
+      const updatedAt = Number(progress.updatedAt);
+      return (
+        Number.isFinite(position) &&
+        position > 0 &&
+        Number.isFinite(duration) &&
+        duration > 0 &&
+        position < duration - PODCAST_PROGRESS_COMPLETION_THRESHOLD_SECONDS &&
+        Number.isFinite(updatedAt) &&
+        updatedAt > 0 &&
+        now - updatedAt <= PODCAST_PROGRESS_RETENTION_MS
+      );
+    })
+    .sort(([, left], [, right]) => Number(right.updatedAt) - Number(left.updatedAt))
+    .slice(0, PODCAST_PROGRESS_MAX_EPISODES);
+
+  validEntries.forEach(([key, progress]) => {
+    normalized.episodes[key] = {
+      position: Number(progress.position),
+      duration: Number(progress.duration),
+      updatedAt: Number(progress.updatedAt)
+    };
+  });
+  return normalized;
+}
+
+function loadPodcastProgressStore() {
+  try {
+    const stored = getLocalStorageItem(PODCAST_PROGRESS_STORAGE_KEY);
+    if (!stored) {
+      return createEmptyPodcastProgressStore();
+    }
+    return normalizePodcastProgressStore(JSON.parse(stored));
+  } catch (error) {
+    return createEmptyPodcastProgressStore();
+  }
+}
+
+function writePodcastProgressStore(store) {
+  try {
+    const normalized = normalizePodcastProgressStore(store);
+    setLocalStorageItem(PODCAST_PROGRESS_STORAGE_KEY, JSON.stringify(normalized));
+  } catch (error) {
+    // 数据异常时不影响播放器本身。
+  }
 }
 
 const I18N = {
@@ -503,6 +600,8 @@ export default {
       podcastNotice: '',
       podcastPlaybackRate: getInitialPodcastPlaybackRate(),
       podcastPlaybackRates: PODCAST_PLAYBACK_RATES,
+      podcastLastProgressPosition: 0,
+      podcastLastProgressSavedAt: 0,
       countdownText: '',
       countdownFullText: '',
       countdownTimer: null
@@ -561,8 +660,13 @@ export default {
     this.countdownTimer = setInterval(() => {
       this.updateCountdown();
     }, 1000);
+    window.addEventListener('pagehide', this.handlePodcastPageExit);
+    document.addEventListener('visibilitychange', this.handlePodcastVisibilityChange);
   },
   beforeUnmount() {
+    this.savePodcastPlaybackProgress();
+    window.removeEventListener('pagehide', this.handlePodcastPageExit);
+    document.removeEventListener('visibilitychange', this.handlePodcastVisibilityChange);
     if (this.countdownTimer) {
       clearInterval(this.countdownTimer);
       this.countdownTimer = null;
@@ -574,7 +678,7 @@ export default {
     },
     switchLang(newLang) {
       this.lang = newLang;
-      localStorage.setItem('lang', newLang);
+      setLocalStorageItem('lang', newLang);
       const url = new URL(window.location);
       url.searchParams.set('lang', newLang);
       history.replaceState(null, '', url);
@@ -583,7 +687,7 @@ export default {
     },
     toggleTheme() {
       this.theme = this.theme === 'dark' ? 'light' : 'dark';
-      localStorage.setItem(THEME_STORAGE_KEY, this.theme);
+      setLocalStorageItem(THEME_STORAGE_KEY, this.theme);
     },
     showEmailHint() {
       window.alert(this.t('emailHint'));
@@ -694,6 +798,7 @@ export default {
       this.resetFeedScroll();
     },
     async loadPodcast() {
+      this.savePodcastPlaybackProgress();
       this.podcastLoading = true;
       this.podcastError = '';
       this.podcastNotice = '';
@@ -725,6 +830,7 @@ export default {
       this.applyPodcastPlaybackRate();
     },
     async loadPodcastByDate(dateText) {
+      this.savePodcastPlaybackProgress();
       this.podcastLoading = true;
       this.podcastError = '';
       this.podcastNotice = '';
@@ -755,8 +861,116 @@ export default {
         return;
       }
       this.podcastPlaybackRate = normalizedRate;
-      localStorage.setItem(PODCAST_PLAYBACK_RATE_STORAGE_KEY, String(normalizedRate));
+      setLocalStorageItem(PODCAST_PLAYBACK_RATE_STORAGE_KEY, String(normalizedRate));
       this.applyPodcastPlaybackRate();
+    },
+    getPodcastProgressKey(podcast = this.latestPodcast) {
+      if (!podcast || !podcast.date || !podcast.audio_url) {
+        return '';
+      }
+      const duration = Math.max(0, Math.round(Number(podcast.duration_seconds) || 0));
+      return `${podcast.date}|${podcast.audio_url}|${duration}`;
+    },
+    savePodcastPlaybackProgress() {
+      const player = this.$refs.podcastPlayer;
+      const progressKey = this.getPodcastProgressKey();
+      if (!player || !progressKey || player.readyState < 1) {
+        return;
+      }
+
+      const position = Number(player.currentTime);
+      const duration = Number(player.duration);
+      if (!Number.isFinite(position) || !Number.isFinite(duration) || duration <= 0) {
+        return;
+      }
+
+      const savedAt = Date.now();
+      const store = loadPodcastProgressStore();
+      if (
+        position <= 0 ||
+        position >= duration - PODCAST_PROGRESS_COMPLETION_THRESHOLD_SECONDS
+      ) {
+        delete store.episodes[progressKey];
+        writePodcastProgressStore(store);
+        this.podcastLastProgressPosition = 0;
+        this.podcastLastProgressSavedAt = savedAt;
+        return;
+      }
+
+      store.episodes[progressKey] = {
+        position,
+        duration,
+        updatedAt: savedAt
+      };
+      writePodcastProgressStore(store);
+      this.podcastLastProgressPosition = position;
+      this.podcastLastProgressSavedAt = savedAt;
+    },
+    restorePodcastPlaybackState() {
+      this.applyPodcastPlaybackRate();
+      const player = this.$refs.podcastPlayer;
+      const progressKey = this.getPodcastProgressKey();
+      this.podcastLastProgressPosition = 0;
+      this.podcastLastProgressSavedAt = Date.now();
+      if (!player || !progressKey) {
+        return;
+      }
+
+      const store = loadPodcastProgressStore();
+      writePodcastProgressStore(store);
+      const progress = store.episodes[progressKey];
+      const duration = Number(player.duration);
+      if (!progress || !Number.isFinite(duration) || duration <= 0) {
+        return;
+      }
+
+      if (
+        progress.position <= 0 ||
+        progress.position >= duration - PODCAST_PROGRESS_COMPLETION_THRESHOLD_SECONDS
+      ) {
+        delete store.episodes[progressKey];
+        writePodcastProgressStore(store);
+        return;
+      }
+
+      try {
+        player.currentTime = progress.position;
+        this.podcastLastProgressPosition = progress.position;
+      } catch (error) {
+        // 音频元数据暂不可 seek 时保持从头播放，不阻断播放器。
+      }
+    },
+    clearPodcastPlaybackProgress() {
+      const progressKey = this.getPodcastProgressKey();
+      if (!progressKey) {
+        return;
+      }
+      const store = loadPodcastProgressStore();
+      delete store.episodes[progressKey];
+      writePodcastProgressStore(store);
+      this.podcastLastProgressPosition = 0;
+      this.podcastLastProgressSavedAt = Date.now();
+    },
+    handlePodcastTimeUpdate() {
+      const player = this.$refs.podcastPlayer;
+      if (!player) {
+        return;
+      }
+      if (Date.now() - this.podcastLastProgressSavedAt < PODCAST_PROGRESS_SAVE_INTERVAL_MS) {
+        return;
+      }
+      this.savePodcastPlaybackProgress();
+    },
+    handlePodcastEnded() {
+      this.clearPodcastPlaybackProgress();
+    },
+    handlePodcastPageExit() {
+      this.savePodcastPlaybackProgress();
+    },
+    handlePodcastVisibilityChange() {
+      if (document.visibilityState === 'hidden') {
+        this.savePodcastPlaybackProgress();
+      }
     },
     applyPodcastPlaybackRate() {
       const player = this.$refs.podcastPlayer;
@@ -933,6 +1147,7 @@ export default {
       }
     },
     async selectSource(sourceId) {
+      this.savePodcastPlaybackProgress();
       if (this.historyMode && this.selectedHistoryDate) {
         await this.loadHistorySource(sourceId);
         return;

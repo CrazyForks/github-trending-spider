@@ -243,6 +243,7 @@ def get_podcast_audio(date_text):
         audio_file,
         media_type="audio/mpeg",
         filename="{}-podcast.mp3".format(date_text),
+        headers={"Cache-Control": "public, max-age=3600"},
     )
 
 
