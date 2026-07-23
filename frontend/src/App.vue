@@ -141,9 +141,6 @@
             {{ podcastEmptyText }}
           </div>
           <div v-else>
-            <div v-if="podcastNotice" class="podcast-notice">
-              {{ podcastNotice }}
-            </div>
             <section class="podcast-episode">
               <div class="podcast-episode-main">
                 <span class="podcast-kicker">{{ t('podcastKicker') }}</span>
@@ -160,7 +157,7 @@
                     ref="podcastPlayer"
                     class="podcast-player"
                     controls
-                    preload="none"
+                    preload="metadata"
                     :src="latestPodcast.audio_url"
                     @loadedmetadata="restorePodcastPlaybackState"
                     @play="applyPodcastPlaybackRate"
@@ -430,8 +427,6 @@ const I18N = {
     podcastItems: '条内容',
     podcastChapters: '本期章节',
     podcastPlaybackSpeed: '播放速度',
-    podcastLatestFailedNotice: '今日播客生成失败，正在展示最近一期',
-    podcastLatestMissingNotice: '今日播客尚未生成，正在展示最近一期',
   },
   en: {
     siteTitle: 'Daily AI Frontier',
@@ -477,8 +472,6 @@ const I18N = {
     podcastItems: 'items',
     podcastChapters: 'Chapters',
     podcastPlaybackSpeed: 'Speed',
-    podcastLatestFailedNotice: 'Today\'s podcast failed. Showing the latest successful episode',
-    podcastLatestMissingNotice: 'Today\'s podcast is not ready. Showing the latest successful episode',
   }
 };
 
@@ -597,7 +590,6 @@ export default {
       latestPodcast: null,
       podcastLoading: false,
       podcastError: '',
-      podcastNotice: '',
       podcastPlaybackRate: getInitialPodcastPlaybackRate(),
       podcastPlaybackRates: PODCAST_PLAYBACK_RATES,
       podcastLastProgressPosition: 0,
@@ -801,7 +793,6 @@ export default {
       this.savePodcastPlaybackProgress();
       this.podcastLoading = true;
       this.podcastError = '';
-      this.podcastNotice = '';
       try {
         const latestResponse = await fetch(`${API_PREFIX}/podcast/latest`);
         if (!latestResponse.ok) {
@@ -809,17 +800,6 @@ export default {
         }
         const latestPayload = await latestResponse.json();
         this.latestPodcast = latestPayload.podcast || null;
-        if (
-          this.latestPodcast &&
-          latestPayload.target_date &&
-          latestPayload.target_date !== this.latestPodcast.date
-        ) {
-          if (latestPayload.target_status === 'failed') {
-            this.podcastNotice = this.t('podcastLatestFailedNotice');
-          } else if (latestPayload.target_status === 'missing') {
-            this.podcastNotice = this.t('podcastLatestMissingNotice');
-          }
-        }
       } catch (error) {
         this.latestPodcast = null;
         this.podcastError = `${this.t('podcastLoadErr')}${error.message}`;
@@ -833,7 +813,6 @@ export default {
       this.savePodcastPlaybackProgress();
       this.podcastLoading = true;
       this.podcastError = '';
-      this.podcastNotice = '';
       try {
         const response = await fetch(`${API_PREFIX}/podcast/dates/${dateText}`);
         if (response.status === 404) {
@@ -1899,17 +1878,6 @@ a {
 }
 
 /* ── Podcast ─────────────────────────────── */
-
-.podcast-notice {
-  margin: 18px 24px 0;
-  padding: 10px 12px;
-  border: 1px solid var(--accent-border);
-  border-radius: 8px;
-  background: var(--primary-soft);
-  color: var(--primary);
-  font-size: 13px;
-  line-height: 1.5;
-}
 
 .podcast-episode {
   display: grid;
